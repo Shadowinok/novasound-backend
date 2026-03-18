@@ -43,6 +43,14 @@ const userSchema = new mongoose.Schema({
   isBlocked: {
     type: Boolean,
     default: false
+  },
+  acceptedTerms: {
+    type: Boolean,
+    default: false
+  },
+  termsVersion: {
+    type: String,
+    default: ''
   }
 }, { timestamps: true });
 
