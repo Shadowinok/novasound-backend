@@ -20,7 +20,8 @@ const hashToken = (token) => crypto.createHash('sha256').update(token).digest('h
 router.post('/register', [
   body('username').trim().isLength({ min: 2, max: 50 }).withMessage('Имя пользователя 2-50 символов'),
   body('email').isEmail().normalizeEmail().withMessage('Некорректный email'),
-  body('password').isLength({ min: 6 }).withMessage('Пароль минимум 6 символов')
+  body('password').isLength({ min: 6 }).withMessage('Пароль минимум 6 символов'),
+  body('acceptTerms').equals('true').withMessage('Нужно принять правила сервиса')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -37,6 +38,8 @@ router.post('/register', [
       username,
       email,
       password,
+      acceptedTerms: true,
+      termsVersion: process.env.TERMS_VERSION || '1.0.0',
       emailVerified: false,
       emailVerifyTokenHash: verifyTokenHash,
       emailVerifyExpires: new Date(Date.now() + 1000 * 60 * 60 * 24)
