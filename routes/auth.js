@@ -46,7 +46,7 @@ router.post('/register', [
     if (!frontendUrl) {
       return res.status(500).json({ message: 'FRONTEND_URL is not configured' });
     }
-    const verifyUrl = `${frontendUrl.replace(/\\/$/, '')}/verify-email?token=${verifyToken}`;
+    const verifyUrl = `${frontendUrl.replace(/\/$/, '')}/verify-email?token=${verifyToken}`;
 
     await sendEmail({
       to: user.email,
@@ -108,7 +108,7 @@ router.post('/login', [
     const token = generateToken(user._id);
     res.json({
       token,
-      user: { id: user._id, username: user.username, email: user.email, role: user.role }
+      user: { id: user._id, username: user.username, email: user.email, role: user.role, emailVerified: user.emailVerified }
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка входа' });
