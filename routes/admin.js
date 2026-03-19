@@ -7,7 +7,7 @@ const ListenLog = require('../models/ListenLog');
 const { getGridFS } = require('../config/gridfs');
 const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
-const { sendEmail } = require('../utils/email');
+const { sendEmail, verifyEmailTransport } = require('../utils/email');
 const multer = require('multer');
 const path = require('path');
 const cloudinary = require('../config/cloudinary');
@@ -16,6 +16,38 @@ const router = express.Router();
 router.use(protect, adminOnly);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// POST /api/admin/email/test — тест SMTP отправки
+router.post('/email/test', [
+  body('to').optional().isEmail().withMessage('Некорректный email получателя')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const to = req.body.to || req.user.email;
+    await verifyEmailTransport();
+    await sendEmail({
+      to,
+      subject: 'NovaSound SMTP test',
+      text: 'Тестовое письмо SMTP от NovaSound.',
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.5">
+          <h2>NovaSound SMTP test</h2>
+          <p>Если вы получили это письмо, SMTP работает корректно.</p>
+        </div>
+      `
+    });
+    res.json({ message: 'Тестовое письмо отправлено', to });
+  } catch (err) {
+    res.status(500).json({
+      message: err.message || 'Ошибка SMTP',
+      code: err.code || '',
+      response: err.response || '',
+      command: err.command || ''
+    });
+  }
+});
 
 // GET /api/admin/users — список пользователей
 router.get('/users', async (req, res) => {
