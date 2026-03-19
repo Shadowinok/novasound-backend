@@ -17,9 +17,23 @@ router.use(protect, adminOnly);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
+// GET /api/admin/users — список пользователей
+router.get('/users', async (req, res) => {
+  try {
+    const users = await User.find({})
+      .select('username email role emailVerified isBlocked createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // DELETE /api/admin/users/:id — удалить аккаунт пользователя (жёстко, без подтверждения)
 router.delete('/users/:id', [
-  param('id').isMongoId()
+  param('id').isMongoId(),
+  body('reason').optional().trim().isLength({ max: 500 })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -27,6 +41,10 @@ router.delete('/users/:id', [
 
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ message: 'Нельзя удалить текущего админа' });
+    }
+    const reason = String(req.body.reason || 'Нарушение правил сервиса');
 
     const tracks = await Track.find({ author: user._id }).select('_id audioFileId').lean();
     const trackIds = tracks.map(t => t._id);
@@ -56,17 +74,18 @@ router.delete('/users/:id', [
       await sendEmail({
         to: user.email,
         subject: 'NovaSound — аккаунт удалён',
-        text: 'Ваш аккаунт был удалён за нарушение правил сервиса.',
+        text: `Ваш аккаунт был удалён администратором. Причина: ${reason}`,
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.5">
             <h2>Аккаунт удалён</h2>
-            <p>Ваш аккаунт в NovaSound был удалён администратором за нарушение правил сервиса.</p>
+            <p>Ваш аккаунт в NovaSound был удалён администратором.</p>
+            <p><b>Причина:</b> ${reason}</p>
           </div>
         `
       });
     } catch (_) {}
 
-    res.json({ message: 'Аккаунт пользователя удалён администратором' });
+    res.json({ message: 'Аккаунт пользователя удалён администратором', reason });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка удаления аккаунта пользователем админом' });
   }
