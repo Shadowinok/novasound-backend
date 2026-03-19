@@ -24,3 +24,9 @@ exports.sendEmail = async ({ to, subject, html, text }) => {
   await transport.sendMail({ from, to, subject, html, text });
 };
 
+exports.verifyEmailTransport = async () => {
+  const transport = getTransport();
+  await transport.verify();
+  return true;
+};
+
