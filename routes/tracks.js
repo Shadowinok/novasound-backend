@@ -351,13 +351,59 @@ router.post('/:id/like', protect, async (req, res) => {
     if (!track || track.status !== 'approved') return res.status(404).json({ message: 'Трек не найден' });
     const id = req.user._id.toString();
     const idx = track.likes.findIndex(l => l.toString() === id);
+    const dislikeIdx = (track.dislikes || []).findIndex(l => l.toString() === id);
     if (idx >= 0) {
       track.likes.splice(idx, 1);
     } else {
       track.likes.push(req.user._id);
+      if (dislikeIdx >= 0) track.dislikes.splice(dislikeIdx, 1);
     }
     await track.save();
-    res.json({ likes: track.likes.length, liked: track.likes.some(l => l.toString() === id) });
+    res.json({
+      likes: track.likes.length,
+      dislikes: (track.dislikes || []).length,
+      liked: track.likes.some(l => l.toString() === id),
+      disliked: (track.dislikes || []).some(l => l.toString() === id)
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/tracks/:id/dislike — дизлайк/снять дизлайк
+router.post('/:id/dislike', protect, async (req, res) => {
+  try {
+    const track = await Track.findById(req.params.id);
+    if (!track || track.status !== 'approved') return res.status(404).json({ message: 'Трек не найден' });
+    const id = req.user._id.toString();
+    const idx = (track.dislikes || []).findIndex(l => l.toString() === id);
+    const likeIdx = track.likes.findIndex(l => l.toString() === id);
+    if (idx >= 0) {
+      track.dislikes.splice(idx, 1);
+    } else {
+      track.dislikes.push(req.user._id);
+      if (likeIdx >= 0) track.likes.splice(likeIdx, 1);
+    }
+    await track.save();
+    res.json({
+      likes: track.likes.length,
+      dislikes: (track.dislikes || []).length,
+      liked: track.likes.some(l => l.toString() === id),
+      disliked: (track.dislikes || []).some(l => l.toString() === id)
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET /api/tracks/my/reports — мои жалобы на треки
+router.get('/my/reports', protect, async (req, res) => {
+  try {
+    const reports = await TrackReport.find({ reporter: req.user._id })
+      .populate('track', 'title status coverImage')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(reports);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

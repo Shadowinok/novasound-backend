@@ -37,6 +37,82 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /api/playlists/my — плейлисты текущего пользователя
+router.get('/my/list', protect, async (req, res) => {
+  try {
+    const playlists = await Playlist.find({ createdBy: req.user._id })
+      .populate('createdBy', 'username')
+      .populate({ path: 'tracks', match: { status: 'approved' }, populate: { path: 'author', select: 'username' } })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(playlists);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/playlists/my — создать свой плейлист
+router.post('/my', protect, [
+  body('title').trim().isLength({ min: 1, max: 100 }).withMessage('Название 1-100 символов'),
+  body('description').optional().trim().isLength({ max: 1000 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const playlist = await Playlist.create({
+      title: req.body.title,
+      description: req.body.description || '',
+      coverImage: '',
+      tracks: [],
+      createdBy: req.user._id
+    });
+    const populated = await Playlist.findById(playlist._id).populate('createdBy', 'username').populate('tracks', 'title coverImage author duration').lean();
+    res.status(201).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/playlists/:id/tracks/:trackId — добавить трек в свой плейлист
+router.post('/:id/tracks/:trackId', protect, [param('id').isMongoId(), param('trackId').isMongoId()], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const playlist = await Playlist.findById(req.params.id);
+    if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (playlist.createdBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Доступ запрещён' });
+    }
+    const track = await Track.findById(req.params.trackId).select('status');
+    if (!track || track.status !== 'approved') return res.status(404).json({ message: 'Трек не найден' });
+    if (!playlist.tracks.some((t) => t.toString() === req.params.trackId)) {
+      playlist.tracks.push(track._id);
+      await playlist.save();
+    }
+    res.json({ message: 'Трек добавлен в плейлист' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE /api/playlists/:id/tracks/:trackId — удалить трек из своего плейлиста
+router.delete('/:id/tracks/:trackId', protect, [param('id').isMongoId(), param('trackId').isMongoId()], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const playlist = await Playlist.findById(req.params.id);
+    if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (playlist.createdBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Доступ запрещён' });
+    }
+    playlist.tracks = playlist.tracks.filter((t) => t.toString() !== req.params.trackId);
+    await playlist.save();
+    res.json({ message: 'Трек удалён из плейлиста' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // POST /api/playlists — только админ
 router.post('/', protect, adminOnly, upload.single('cover'), [
   body('title').trim().isLength({ min: 1, max: 100 }).withMessage('Название 1-100 символов'),

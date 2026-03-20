@@ -165,13 +165,17 @@ router.put('/track-reports/:reportId/resolve', [
     const { reportId } = req.params;
     const { action, adminComment } = req.body;
 
-    const report = await TrackReport.findById(reportId);
+    const report = await TrackReport.findById(reportId).populate('reporter', 'email username');
     if (!report) return res.status(404).json({ message: 'Жалоба не найдена' });
     if (report.status !== 'open') return res.status(400).json({ message: 'Жалоба уже обработана' });
 
+    let affectedTrackTitle = '';
+    let affectedTrackAuthorEmail = '';
     if (action === 'rejectTrack') {
-      const track = await Track.findById(report.track);
+      const track = await Track.findById(report.track).populate('author', 'email username');
       if (track) {
+        affectedTrackTitle = track.title;
+        affectedTrackAuthorEmail = track.author?.email || '';
         track.status = 'rejected';
         track.moderationComment = adminComment || report.text.slice(0, 200);
         track.rejectedAt = new Date();
@@ -184,6 +188,42 @@ router.put('/track-reports/:reportId/resolve', [
     report.moderationComment = adminComment || report.moderationComment || '';
     report.resolvedBy = req.user._id;
     await report.save();
+
+    // Уведомляем автора жалобы
+    try {
+      if (report.reporter?.email) {
+        await sendEmail({
+          to: report.reporter.email,
+          subject: 'NovaSound — ваша жалоба обработана',
+          text: `Жалоба обработана. Решение: ${action === 'rejectTrack' ? 'трек отклонён' : 'трек оставлен'}.\nКомментарий модератора: ${adminComment || 'Без комментария.'}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; line-height: 1.5">
+              <h2>Ваша жалоба обработана</h2>
+              <p><b>Решение:</b> ${action === 'rejectTrack' ? 'Трек отклонён' : 'Трек оставлен'}</p>
+              <p><b>Комментарий модератора:</b> ${adminComment || 'Без комментария.'}</p>
+            </div>
+          `
+        });
+      }
+    } catch (_) {}
+
+    // Если трек отклонён — уведомляем автора трека
+    try {
+      if (action === 'rejectTrack' && affectedTrackAuthorEmail) {
+        await sendEmail({
+          to: affectedTrackAuthorEmail,
+          subject: 'NovaSound — ваш трек отклонён по жалобе',
+          text: `Трек "${affectedTrackTitle || ''}" отклонён после обработки жалобы.\nКомментарий модератора: ${adminComment || 'Без комментария.'}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; line-height: 1.5">
+              <h2>Трек отклонён</h2>
+              <p>Ваш трек <b>${affectedTrackTitle || 'Без названия'}</b> отклонён после обработки жалобы.</p>
+              <p><b>Комментарий модератора:</b> ${adminComment || 'Без комментария.'}</p>
+            </div>
+          `
+        });
+      }
+    } catch (_) {}
 
     res.json({ message: 'Жалоба обработана' });
   } catch (err) {
