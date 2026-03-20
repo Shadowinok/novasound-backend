@@ -10,11 +10,20 @@ function getTransport() {
     throw new Error('SMTP is not configured (SMTP_HOST/SMTP_USER/SMTP_PASS)');
   }
 
+  // Короткие таймауты: долгий «зависший» SMTP ломает регистрацию и Postman Cloud (~30s)
+  const connectionTimeout = Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 20000);
+  const greetingTimeout = Number(process.env.SMTP_GREETING_TIMEOUT_MS || 20000);
+  const socketTimeout = Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000);
+
   return nodemailer.createTransport({
     host,
     port,
     secure: port === 465,
-    auth: { user, pass }
+    auth: { user, pass },
+    connectionTimeout,
+    greetingTimeout,
+    socketTimeout,
+    tls: { servername: host }
   });
 }
 
