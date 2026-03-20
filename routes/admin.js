@@ -144,12 +144,22 @@ router.delete('/users/:id', [
 router.get('/track-reports', async (req, res) => {
   try {
     const { status = 'open' } = req.query;
-    const reports = await TrackReport.find({ status })
+    const reports = await TrackReport.find({ status, escalatedToAdmin: true })
       .populate('track', 'title coverImage author status')
       .populate('reporter', 'username email')
       .sort({ createdAt: -1 })
       .lean();
-    res.json(reports);
+    const trackIds = reports.map((r) => r.track?._id).filter(Boolean);
+    const uniqCountsRaw = await TrackReport.aggregate([
+      { $match: { status: 'open', escalatedToAdmin: true, track: { $in: trackIds } } },
+      { $group: { _id: '$track', reporters: { $addToSet: '$reporter' } } },
+      { $project: { uniqueReporters: { $size: '$reporters' } } }
+    ]);
+    const uniqMap = new Map(uniqCountsRaw.map((x) => [String(x._id), x.uniqueReporters]));
+    res.json(reports.map((r) => ({
+      ...r,
+      uniqueReporters: uniqMap.get(String(r.track?._id || '')) || 1
+    })));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

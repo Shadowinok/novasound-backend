@@ -39,6 +39,23 @@ const uploadTrackFiles = (req, res, next) => {
   });
 };
 
+function classifyReportText(text = '') {
+  const t = String(text).toLowerCase();
+  const groups = {
+    hate: ['разжиган', 'ненавист', 'расизм', 'нацизм', 'hate', 'ethnic'],
+    drugs: ['наркот', 'drug', 'кокаин', 'героин', 'амфетамин'],
+    violence: ['убий', 'насили', 'гори', 'войн', 'violence', 'kill'],
+    extremism: ['экстрем', 'террор', 'terror', 'бомб'],
+    sexual: ['порно', 'sex', 'сексуал', '18+']
+  };
+  for (const [category, words] of Object.entries(groups)) {
+    if (words.some((w) => t.includes(w))) return { isSerious: true, category };
+  }
+  const seriousGeneric = ['угроз', 'докс', 'пропаганд', 'child abuse', 'суицид'];
+  if (seriousGeneric.some((w) => t.includes(w))) return { isSerious: true, category: 'other-serious' };
+  return { isSerious: false, category: 'non-serious' };
+}
+
 // GET /api/tracks/my — мои треки (авторизованный пользователь), ?status=pending|approved|rejected
 router.get('/my', protect, async (req, res) => {
   try {
@@ -248,32 +265,46 @@ router.post('/:id/report', protect, [
       return res.status(400).json({ message: 'У вас уже есть открытая жалоба на этот трек' });
     }
 
-    const cooldownHours = Number(process.env.REPORT_COOLDOWN_HOURS || 24);
-    const lastReport = await TrackReport.findOne({
-      track: track._id,
-      reporter: req.user._id
-    }).sort({ createdAt: -1 }).select('createdAt');
-    if (lastReport?.createdAt) {
-      const msSinceLast = Date.now() - new Date(lastReport.createdAt).getTime();
-      const cooldownMs = cooldownHours * 60 * 60 * 1000;
-      if (msSinceLast < cooldownMs) {
-        const hoursLeft = Math.max(1, Math.ceil((cooldownMs - msSinceLast) / (60 * 60 * 1000)));
-        return res.status(400).json({ message: `Повторную жалобу можно отправить через ~${hoursLeft} ч` });
-      }
+    const { isSerious, category } = classifyReportText(text);
+    if (!isSerious) {
+      return res.status(400).json({
+        message: 'Жалоба не относится к серьёзным нарушениям. Для оценки используйте лайк/дизлайк.'
+      });
     }
 
-    const aiSuggestedAction = containsProfanity(text.toLowerCase())
-      ? 'rejectTrack'
-      : 'needsManual';
+    const priorSeriousCount = await TrackReport.countDocuments({
+      track: track._id,
+      reporter: req.user._id,
+      reasonCategory: category,
+      isSerious: true
+    });
+    const attemptNumber = priorSeriousCount + 1;
+    const escalatedToAdmin = attemptNumber >= 4;
+
+    const aiSuggestedAction = escalatedToAdmin ? 'needsManual' : 'leave';
 
     const report = await TrackReport.create({
       track: track._id,
       reporter: req.user._id,
       text,
-      aiSuggestedAction
+      aiSuggestedAction,
+      reasonCategory: category,
+      isSerious,
+      escalatedToAdmin,
+      attemptNumber,
+      status: escalatedToAdmin ? 'open' : 'resolved',
+      adminAction: escalatedToAdmin ? 'none' : 'leave',
+      moderationComment: escalatedToAdmin
+        ? ''
+        : `Автообработка ИИ: жалоба зафиксирована как попытка #${attemptNumber}/4. До эскалации админу нужно 4 обращения по серьёзной причине.`
     });
 
-    res.status(201).json(report);
+    res.status(201).json({
+      ...report.toObject(),
+      message: escalatedToAdmin
+        ? 'Жалоба эскалирована администратору'
+        : `Жалоба обработана ИИ (попытка ${attemptNumber}/4). Админу уйдёт на 4-й серьёзной жалобе`
+    });
   } catch (err) {
     if (err?.code === 11000) {
       return res.status(400).json({ message: 'У вас уже есть открытая жалоба на этот трек' });
