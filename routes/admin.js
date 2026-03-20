@@ -192,6 +192,12 @@ router.put('/track-reports/:reportId/resolve', [
         await track.save();
       }
 
+      const autoResolvedReports = await TrackReport.find({
+        track: report.track,
+        status: 'open',
+        _id: { $ne: report._id }
+      }).populate('reporter', 'email username');
+
       // Автоматически закрываем все остальные открытые жалобы по этому треку,
       // чтобы админка не захламлялась после финального решения.
       await TrackReport.updateMany(
@@ -205,6 +211,26 @@ router.put('/track-reports/:reportId/resolve', [
           }
         }
       );
+
+      // Уведомляем остальных жалобщиков, чьи жалобы закрылись автоматически.
+      for (const rep of autoResolvedReports) {
+        try {
+          if (rep.reporter?.email) {
+            await sendEmail({
+              to: rep.reporter.email,
+              subject: 'NovaSound — ваша жалоба обработана',
+              text: 'Ваша жалоба рассмотрена: трек удалён с публичной выдачи.',
+              html: `
+                <div style="font-family: Arial, sans-serif; line-height: 1.5">
+                  <h2>Ваша жалоба обработана</h2>
+                  <p>Трек удалён с публичной выдачи.</p>
+                  <p>Спасибо за помощь в модерации.</p>
+                </div>
+              `
+            });
+          }
+        } catch (_) {}
+      }
     }
 
     report.status = 'resolved';
