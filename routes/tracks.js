@@ -248,6 +248,20 @@ router.post('/:id/report', protect, [
       return res.status(400).json({ message: 'У вас уже есть открытая жалоба на этот трек' });
     }
 
+    const cooldownHours = Number(process.env.REPORT_COOLDOWN_HOURS || 24);
+    const lastReport = await TrackReport.findOne({
+      track: track._id,
+      reporter: req.user._id
+    }).sort({ createdAt: -1 }).select('createdAt');
+    if (lastReport?.createdAt) {
+      const msSinceLast = Date.now() - new Date(lastReport.createdAt).getTime();
+      const cooldownMs = cooldownHours * 60 * 60 * 1000;
+      if (msSinceLast < cooldownMs) {
+        const hoursLeft = Math.max(1, Math.ceil((cooldownMs - msSinceLast) / (60 * 60 * 1000)));
+        return res.status(400).json({ message: `Повторную жалобу можно отправить через ~${hoursLeft} ч` });
+      }
+    }
+
     const aiSuggestedAction = containsProfanity(text.toLowerCase())
       ? 'rejectTrack'
       : 'needsManual';
