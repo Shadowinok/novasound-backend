@@ -239,6 +239,15 @@ router.post('/:id/report', protect, [
     // Жаловаться имеет смысл на уже доступные треки
     if (track.status !== 'approved') return res.status(400).json({ message: 'Жалобы принимаются только для одобренных треков' });
 
+    const existingOpen = await TrackReport.findOne({
+      track: track._id,
+      reporter: req.user._id,
+      status: 'open'
+    }).select('_id');
+    if (existingOpen) {
+      return res.status(400).json({ message: 'У вас уже есть открытая жалоба на этот трек' });
+    }
+
     const aiSuggestedAction = containsProfanity(text.toLowerCase())
       ? 'rejectTrack'
       : 'needsManual';
@@ -252,6 +261,9 @@ router.post('/:id/report', protect, [
 
     res.status(201).json(report);
   } catch (err) {
+    if (err?.code === 11000) {
+      return res.status(400).json({ message: 'У вас уже есть открытая жалоба на этот трек' });
+    }
     res.status(500).json({ message: err.message || 'Ошибка создания жалобы' });
   }
 });
