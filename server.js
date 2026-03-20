@@ -15,7 +15,36 @@ connectDB();
 initGridFS();
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+const normalizeOrigin = (v) => String(v || '').trim().replace(/\/$/, '');
+const primaryFrontend = normalizeOrigin(process.env.FRONTEND_URL);
+const legacyFrontend = 'https://novasound.vercel.app';
+const allowedOrigins = new Set(
+  [primaryFrontend, legacyFrontend]
+    .filter(Boolean)
+    .flatMap((o) => {
+      try {
+        const u = new URL(o);
+        if (u.hostname.startsWith('www.')) {
+          const noWww = `${u.protocol}//${u.hostname.replace(/^www\./, '')}`;
+          return [o, noWww];
+        }
+        const withWww = `${u.protocol}//www.${u.hostname}`;
+        return [o, withWww];
+      } catch (_) {
+        return [o];
+      }
+    })
+);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    const normalized = normalizeOrigin(origin);
+    if (allowedOrigins.has(normalized)) return callback(null, true);
+    return callback(new Error('CORS origin denied'));
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 
 app.use('/api/auth', authRoutes);
