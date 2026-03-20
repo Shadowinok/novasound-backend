@@ -10,6 +10,7 @@ const { containsProfanity } = require('../utils/profanityFilter');
 const { getGridFS } = require('../config/gridfs');
 const cloudinary = require('../config/cloudinary');
 const { parseBuffer } = require('music-metadata');
+const TrackReport = require('../models/TrackReport');
 
 const router = express.Router();
 
@@ -129,6 +130,23 @@ router.post('/', protect, uploadTrackFiles, [
     }
     if (duration < 30) return res.status(400).json({ message: 'Длительность трека должна быть не менее 30 секунд' });
 
+    // Базовая (быстрая) AI-модерация по тексту: чистые треки сразу approved,
+    // подозрительные — pending (админ посмотрит по жалобе/спорным случаям).
+    // Аморальное/запрещенное реальными ИИ мы заменим позже, сейчас — детерминированные правила.
+    const textToModerate = `${title} ${description || ''}`.toLowerCase();
+    const suspiciousKeywords = [
+      'порно', 'sex', '18+', 'наркот', 'суицид', 'взрыв', 'бомб', 'убий', 'убийство',
+      'расизм', 'нацизм', 'экстрем', 'террор', 'докс', 'угроз', 'hate', 'самоуб'
+    ];
+    const hasProfanity = containsProfanity(textToModerate);
+    const hasSuspicious = suspiciousKeywords.some((k) => textToModerate.includes(k));
+    const moderationStatus = hasProfanity ? 'rejected' : hasSuspicious ? 'pending' : 'approved';
+    const moderationReason = hasProfanity
+      ? 'Недопустимое содержание в названии/описании'
+      : hasSuspicious
+        ? 'Подозрительный контент — требуется ручная проверка'
+        : '';
+
     let coverImage = '';
     if (req.files.cover?.[0]) {
       stage = 'cover-upload';
@@ -186,8 +204,12 @@ router.post('/', protect, uploadTrackFiles, [
       audioFileId,
       coverImage,
       duration,
-      status: 'pending'
+      status: moderationStatus,
+      moderationComment: moderationReason
     });
+    if (moderationStatus === 'approved') track.approvedAt = new Date();
+    if (moderationStatus === 'rejected') track.rejectedAt = new Date();
+    await track.save();
     stage = 'db-populate';
     const populated = await Track.findById(track._id).populate('author', 'username').lean();
     res.status(201).json(populated);
@@ -200,6 +222,37 @@ router.post('/', protect, uploadTrackFiles, [
     // eslint-disable-next-line no-console
     console.error('Track upload failed', { stage, detail, err });
     res.status(500).json({ message: `Ошибка загрузки на этапе "${stage}": ${detail}` });
+  }
+});
+
+// POST /api/tracks/:id/report — пожаловаться на трек (не скрываем трек сразу)
+router.post('/:id/report', protect, [
+  param('id').isMongoId(),
+  body('text').trim().isLength({ min: 10, max: 2000 }).withMessage('Укажите описание жалобы (10-2000 символов)')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { text } = req.body;
+
+    const track = await Track.findById(id).select('author status');
+    if (!track) return res.status(404).json({ message: 'Трек не найден' });
+    // Жаловаться имеет смысл на уже доступные треки
+    if (track.status !== 'approved') return res.status(400).json({ message: 'Жалобы принимаются только для одобренных треков' });
+
+    const aiSuggestedAction = containsProfanity(text.toLowerCase())
+      ? 'rejectTrack'
+      : 'needsManual';
+
+    const report = await TrackReport.create({
+      track: track._id,
+      reporter: req.user._id,
+      text,
+      aiSuggestedAction
+    });
+
+    res.status(201).json(report);
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка создания жалобы' });
   }
 });
 

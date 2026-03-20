@@ -4,6 +4,7 @@ const Track = require('../models/Track');
 const Playlist = require('../models/Playlist');
 const User = require('../models/User');
 const ListenLog = require('../models/ListenLog');
+const TrackReport = require('../models/TrackReport');
 const { getGridFS } = require('../config/gridfs');
 const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
@@ -36,7 +37,7 @@ router.post('/email/test', [
 
     const to = req.body.to || req.user.email;
     await verifyEmailTransport();
-    await sendEmail({
+    const sent = await sendEmail({
       to,
       subject: 'NovaSound SMTP test',
       text: 'Тестовое письмо SMTP от NovaSound.',
@@ -47,7 +48,14 @@ router.post('/email/test', [
         </div>
       `
     });
-    res.json({ message: 'Тестовое письмо отправлено', to });
+    res.json({
+      message: 'Тестовое письмо отправлено',
+      to,
+      resendId: sent?.resendId || null,
+      hint: sent?.resendId
+        ? 'Проверьте доставку в Resend (Emails) или GET https://api.resend.com/emails/' + sent.resendId
+        : undefined
+    });
   } catch (err) {
     res.status(500).json({
       message: err.message || 'Ошибка SMTP',
@@ -129,6 +137,57 @@ router.delete('/users/:id', [
     res.json({ message: 'Аккаунт пользователя удалён администратором', reason });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка удаления аккаунта пользователем админом' });
+  }
+});
+
+// GET /api/admin/track-reports — очередь жалоб
+router.get('/track-reports', async (req, res) => {
+  try {
+    const { status = 'open' } = req.query;
+    const reports = await TrackReport.find({ status })
+      .populate('track', 'title coverImage author status')
+      .populate('reporter', 'username email')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(reports);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PUT /api/admin/track-reports/:reportId/resolve — решение админа
+router.put('/track-reports/:reportId/resolve', [
+  param('reportId').isMongoId(),
+  body('action').isIn(['leave', 'rejectTrack']).withMessage('action должен быть leave или rejectTrack'),
+  body('adminComment').optional().trim().isLength({ max: 2000 })
+], async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { action, adminComment } = req.body;
+
+    const report = await TrackReport.findById(reportId);
+    if (!report) return res.status(404).json({ message: 'Жалоба не найдена' });
+    if (report.status !== 'open') return res.status(400).json({ message: 'Жалоба уже обработана' });
+
+    if (action === 'rejectTrack') {
+      const track = await Track.findById(report.track);
+      if (track) {
+        track.status = 'rejected';
+        track.moderationComment = adminComment || report.text.slice(0, 200);
+        track.rejectedAt = new Date();
+        await track.save();
+      }
+    }
+
+    report.status = 'resolved';
+    report.adminAction = action === 'rejectTrack' ? 'rejectTrack' : 'leave';
+    report.moderationComment = adminComment || report.moderationComment || '';
+    report.resolvedBy = req.user._id;
+    await report.save();
+
+    res.json({ message: 'Жалоба обработана' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 
