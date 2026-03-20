@@ -92,9 +92,7 @@ router.get('/', async (req, res) => {
 // POST /api/tracks — загрузка (авторизованный пользователь)
 router.post('/', protect, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
-  body('description').optional().trim().isLength({ max: 2000 }),
-  body('coverSource').optional().isIn(['upload', 'url']).withMessage('coverSource должен быть upload или url'),
-  body('coverUrl').optional().isURL({ require_protocol: true }).withMessage('coverUrl должен быть валидным URL')
+  body('description').optional().trim().isLength({ max: 2000 })
 ], async (req, res) => {
   let stage = 'start';
   try {
