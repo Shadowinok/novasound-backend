@@ -28,6 +28,11 @@ const trackReportSchema = new mongoose.Schema(
 );
 
 trackReportSchema.index({ status: 1, createdAt: -1 });
+// Один пользователь не должен иметь несколько одновременно открытых жалоб на один трек
+trackReportSchema.index(
+  { track: 1, reporter: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: 'open' } }
+);
 
 module.exports = mongoose.model('TrackReport', trackReportSchema);
 
