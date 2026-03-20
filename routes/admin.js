@@ -191,6 +191,20 @@ router.put('/track-reports/:reportId/resolve', [
         track.rejectedAt = new Date();
         await track.save();
       }
+
+      // Автоматически закрываем все остальные открытые жалобы по этому треку,
+      // чтобы админка не захламлялась после финального решения.
+      await TrackReport.updateMany(
+        { track: report.track, status: 'open', _id: { $ne: report._id } },
+        {
+          $set: {
+            status: 'resolved',
+            adminAction: 'rejectTrack',
+            moderationComment: 'Ваша жалоба рассмотрена: трек удалён с публичной выдачи.',
+            resolvedBy: req.user._id
+          }
+        }
+      );
     }
 
     report.status = 'resolved';
