@@ -47,6 +47,10 @@ const trackSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
+  dislikes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   rejectedAt: Date,
   approvedAt: Date
 }, { timestamps: true });
