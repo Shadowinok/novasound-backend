@@ -107,6 +107,21 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/tracks/latest — совместимость со старым фронтендом
+router.get('/latest', async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 12, 50));
+    const tracks = await Track.find({ status: 'approved' })
+      .populate('author', 'username')
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+    res.json(tracks);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // POST /api/tracks — загрузка (авторизованный пользователь)
 router.post('/', protect, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
