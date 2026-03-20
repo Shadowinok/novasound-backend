@@ -93,16 +93,20 @@ router.post('/', protect, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
   body('description').optional().trim().isLength({ max: 2000 })
 ], async (req, res) => {
+  let stage = 'start';
   try {
+    stage = 'validate';
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     if (!req.files?.audio?.[0]) return res.status(400).json({ message: 'Нужен аудиофайл' });
 
+    stage = 'content-check';
     const { title, description } = req.body;
     if (containsProfanity(title) || containsProfanity(description || '')) {
       return res.status(400).json({ message: 'Недопустимое содержимое в названии или описании' });
     }
 
+    stage = 'duplicate-check';
     // Дубликат: тот же автор, то же название за последний час
     const duplicate = await Track.findOne({
       author: req.user._id,
@@ -111,6 +115,7 @@ router.post('/', protect, uploadTrackFiles, [
     });
     if (duplicate) return res.status(400).json({ message: 'Трек с таким названием уже загружен недавно' });
 
+    stage = 'duration-check';
     // Длительность — не короче 30 сек (против спама)
     let duration = 30;
     try {
@@ -125,6 +130,7 @@ router.post('/', protect, uploadTrackFiles, [
 
     let coverImage = '';
     if (req.files.cover?.[0]) {
+      stage = 'cover-upload';
       const result = await new Promise((resolve, reject) => {
         cloudinary.uploader.upload_stream(
           { folder: 'novasound/covers', resource_type: 'image' },
@@ -134,8 +140,13 @@ router.post('/', protect, uploadTrackFiles, [
       coverImage = result.secure_url;
     }
 
+    stage = 'gridfs-init';
     const { gridfsBucket } = getGridFS();
+    if (!gridfsBucket) {
+      return res.status(500).json({ message: 'Хранилище аудио не инициализировано (GridFS)' });
+    }
     const audioFile = req.files.audio[0];
+    stage = 'audio-upload';
     const uploadStream = gridfsBucket.openUploadStream(audioFile.originalname, {
       contentType: audioFile.mimetype,
       metadata: { userId: req.user._id.toString() }
@@ -147,6 +158,7 @@ router.post('/', protect, uploadTrackFiles, [
     });
     const audioFileId = uploadStream.id;
 
+    stage = 'db-save';
     const track = await Track.create({
       title,
       description: description || '',
@@ -156,10 +168,18 @@ router.post('/', protect, uploadTrackFiles, [
       duration,
       status: 'pending'
     });
+    stage = 'db-populate';
     const populated = await Track.findById(track._id).populate('author', 'username').lean();
     res.status(201).json(populated);
   } catch (err) {
-    res.status(500).json({ message: err.message || 'Ошибка загрузки' });
+    const detail =
+      err?.message
+      || err?.error?.message
+      || err?.name
+      || 'Неизвестная ошибка';
+    // eslint-disable-next-line no-console
+    console.error('Track upload failed', { stage, detail, err });
+    res.status(500).json({ message: `Ошибка загрузки на этапе "${stage}": ${detail}` });
   }
 });
 
