@@ -7,7 +7,7 @@ const ListenLog = require('../models/ListenLog');
 const { getGridFS } = require('../config/gridfs');
 const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
-const { sendEmail, verifyEmailTransport } = require('../utils/email');
+const { sendEmail, verifyEmailTransport, getEmailModeInfo } = require('../utils/email');
 const multer = require('multer');
 const path = require('path');
 const cloudinary = require('../config/cloudinary');
@@ -16,6 +16,15 @@ const router = express.Router();
 router.use(protect, adminOnly);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// GET /api/admin/email/status — какой режим почты видит сервер (Resend vs SMTP), без секретов
+router.get('/email/status', async (req, res) => {
+  try {
+    res.json(getEmailModeInfo());
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // POST /api/admin/email/test — тест SMTP отправки
 router.post('/email/test', [
