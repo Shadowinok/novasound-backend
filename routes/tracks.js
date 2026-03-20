@@ -24,6 +24,19 @@ const upload = multer({
   }
 });
 
+const uploadTrackFiles = (req, res, next) => {
+  upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'cover', maxCount: 1 }])(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ message: 'Файл слишком большой (макс. 50 МБ)' });
+      }
+      return res.status(400).json({ message: `Ошибка загрузки файла: ${err.code}` });
+    }
+    return res.status(400).json({ message: err.message || 'Ошибка загрузки файла' });
+  });
+};
+
 // GET /api/tracks/my — мои треки (авторизованный пользователь), ?status=pending|approved|rejected
 router.get('/my', protect, async (req, res) => {
   try {
@@ -76,7 +89,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/tracks — загрузка (авторизованный пользователь)
-router.post('/', protect, upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), [
+router.post('/', protect, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
   body('description').optional().trim().isLength({ max: 2000 })
 ], async (req, res) => {
