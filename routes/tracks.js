@@ -9,6 +9,7 @@ const { body, param, validationResult } = require('express-validator');
 const { containsProfanity } = require('../utils/profanityFilter');
 const { getGridFS } = require('../config/gridfs');
 const cloudinary = require('../config/cloudinary');
+const { parseBuffer } = require('music-metadata');
 
 const router = express.Router();
 
@@ -91,7 +92,9 @@ router.get('/', async (req, res) => {
 // POST /api/tracks — загрузка (авторизованный пользователь)
 router.post('/', protect, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
-  body('description').optional().trim().isLength({ max: 2000 })
+  body('description').optional().trim().isLength({ max: 2000 }),
+  body('coverSource').optional().isIn(['upload', 'url']).withMessage('coverSource должен быть upload или url'),
+  body('coverUrl').optional().isURL({ require_protocol: true }).withMessage('coverUrl должен быть валидным URL')
 ], async (req, res) => {
   let stage = 'start';
   try {
@@ -138,6 +141,25 @@ router.post('/', protect, uploadTrackFiles, [
         ).end(req.files.cover[0].buffer);
       });
       coverImage = result.secure_url;
+    } else {
+      // Если пользователь не загрузил отдельную обложку — пытаемся взять embedded cover из аудио.
+      stage = 'embedded-cover-extract';
+      try {
+        const metadata = await parseBuffer(req.files.audio[0].buffer, req.files.audio[0].mimetype || undefined, { duration: false });
+        const pic = metadata?.common?.picture?.[0];
+        if (pic?.data) {
+          stage = 'embedded-cover-upload';
+          const embeddedCover = await new Promise((resolve, reject) => {
+            cloudinary.uploader.upload_stream(
+              { folder: 'novasound/covers', resource_type: 'image' },
+              (err, result) => (err ? reject(err) : resolve(result))
+            ).end(pic.data);
+          });
+          coverImage = embeddedCover.secure_url;
+        }
+      } catch (_) {
+        // Embedded cover опциональна: если не распарсилось — грузим трек без обложки.
+      }
     }
 
     stage = 'gridfs-init';
