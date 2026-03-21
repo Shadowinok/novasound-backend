@@ -122,6 +122,55 @@ router.get('/latest', async (req, res) => {
   }
 });
 
+const uploadCoverOnly = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.fieldname === 'cover' && ['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) return cb(null, true);
+    cb(new Error('Нужен файл изображения: jpg, png или webp'));
+  }
+});
+
+const uploadCoverMiddleware = (req, res, next) => {
+  uploadCoverOnly.single('cover')(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'Обложка слишком большая (макс. 5 МБ)' });
+    }
+    return res.status(400).json({ message: err.message || 'Ошибка загрузки обложки' });
+  });
+};
+
+// PUT /api/tracks/:id/cover — сменить обложку у одобренного трека (без повторной модерации)
+router.put('/:id/cover', protect, [param('id').isMongoId()], uploadCoverMiddleware, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!req.file) return res.status(400).json({ message: 'Выберите файл обложки' });
+    const track = await Track.findById(req.params.id);
+    if (!track) return res.status(404).json({ message: 'Трек не найден' });
+    if (track.author.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Можно менять обложку только у своих треков' });
+    }
+    if (track.status !== 'approved') {
+      return res.status(400).json({ message: 'Обложку так можно менять только у одобренных треков' });
+    }
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader.upload_stream(
+        { folder: 'novasound/covers', resource_type: 'image' },
+        (err, r) => (err ? reject(err) : resolve(r))
+      ).end(req.file.buffer);
+    });
+    track.coverImage = result.secure_url;
+    await track.save();
+    const populated = await Track.findById(track._id).populate('author', 'username').lean();
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Не удалось обновить обложку' });
+  }
+});
+
 // POST /api/tracks — загрузка (авторизованный пользователь)
 router.post('/', protect, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
