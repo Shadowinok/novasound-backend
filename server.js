@@ -18,8 +18,10 @@ const app = express();
 const normalizeOrigin = (v) => String(v || '').trim().replace(/\/$/, '');
 const primaryFrontend = normalizeOrigin(process.env.FRONTEND_URL);
 const legacyFrontend = 'https://novasound.vercel.app';
+// Явно: даже если FRONTEND_URL в Render с пробелом/опечаткой — кастомный домен не отвалится по CORS.
+const extraFrontends = ['https://novasoundapp.ru', 'https://www.novasoundapp.ru'];
 const allowedOrigins = new Set(
-  [primaryFrontend, legacyFrontend]
+  [...extraFrontends, primaryFrontend, legacyFrontend]
     .filter(Boolean)
     .flatMap((o) => {
       try {
