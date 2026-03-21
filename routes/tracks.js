@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const Track = require('../models/Track');
 const ListenLog = require('../models/ListenLog');
-const { protect, optionalAuth } = require('../middleware/auth');
+const { protect, optionalAuth, protectStream } = require('../middleware/auth');
 const { body, param, validationResult } = require('express-validator');
 const { containsProfanity } = require('../utils/profanityFilter');
 const { getGridFS } = require('../config/gridfs');
@@ -69,8 +69,8 @@ router.get('/my', protect, async (req, res) => {
   }
 });
 
-// GET /api/tracks/audio/:fileId — стриминг аудио из GridFS (должен быть выше /:id)
-router.get('/audio/:fileId', async (req, res) => {
+// GET /api/tracks/audio/:fileId — стриминг аудио из GridFS (только авторизованные; ?token= для HTML5)
+router.get('/audio/:fileId', protectStream, async (req, res) => {
   try {
     const { gridfsBucket } = getGridFS();
     const _id = new mongoose.Types.ObjectId(req.params.fileId);
@@ -393,12 +393,12 @@ router.delete('/:id', protect, async (req, res) => {
   }
 });
 
-// POST /api/tracks/:id/play — учёт прослушивания
-router.post('/:id/play', optionalAuth, async (req, res) => {
+// POST /api/tracks/:id/play — учёт прослушивания (только залогиненные; гости не слушают)
+router.post('/:id/play', protect, async (req, res) => {
   try {
     const track = await Track.findById(req.params.id);
     if (!track || track.status !== 'approved') return res.status(404).json({ message: 'Трек не найден' });
-    const userId = req.user?._id || null;
+    const userId = req.user._id;
     const ip = (req.headers['x-forwarded-for'] || req.connection?.remoteAddress || '').split(',')[0].trim();
     const recent = await ListenLog.findOne({
       track: track._id,
