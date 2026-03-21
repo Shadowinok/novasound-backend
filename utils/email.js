@@ -77,17 +77,33 @@ async function sendViaResend({ to, subject, html, text }) {
     } catch (_) {}
     throw new Error(`Resend error ${res.status}: ${detail}`);
   }
-  return true;
+  let data = {};
+  try {
+    data = JSON.parse(raw);
+  } catch (_) {}
+  return { resendId: data.id || null };
 }
 
+/** Добавляется ко всем письмам (регистрация, админ и т.д.) */
+const SPAM_HINT_HTML =
+  '<p style="color:#666;font-size:13px;margin-top:16px;border-top:1px solid #eee;padding-top:12px">Если письма нет во «Входящих», проверьте папку «Спам» или «Нежелательная почта».</p>';
+const SPAM_HINT_TEXT =
+  '\n\n---\nЕсли письма нет во «Входящих», проверьте папку «Спам» или «Нежелательная почта».';
+
 exports.sendEmail = async ({ to, subject, html, text }) => {
+  let htmlOut = html;
+  let textOut = text;
+  if (htmlOut) htmlOut = `${htmlOut}${SPAM_HINT_HTML}`;
+  if (textOut) textOut = `${textOut}${SPAM_HINT_TEXT}`;
+
   if (getResendApiKey()) {
-    return sendViaResend({ to, subject, html, text });
+    return sendViaResend({ to, subject, html: htmlOut, text: textOut });
   }
 
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const transport = getSmtpTransport();
-  await transport.sendMail({ from, to, subject, html, text });
+  await transport.sendMail({ from, to, subject, html: htmlOut, text: textOut });
+  return { via: 'smtp' };
 };
 
 /**
