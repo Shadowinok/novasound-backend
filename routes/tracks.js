@@ -122,12 +122,18 @@ router.get('/latest', async (req, res) => {
   }
 });
 
+const coverMimeOk = (mime) =>
+  ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'].includes(String(mime || '').toLowerCase());
+
 const uploadCoverOnly = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (file.fieldname === 'cover' && ['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) return cb(null, true);
+    if (file.fieldname !== 'cover') return cb(new Error('Ожидается поле cover'));
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const extOk = ['.jpg', '.jpeg', '.png', '.webp'].includes(ext);
+    // С телефонов часто приходит имя без расширения — смотрим MIME
+    if (extOk || coverMimeOk(file.mimetype)) return cb(null, true);
     cb(new Error('Нужен файл изображения: jpg, png или webp'));
   }
 });
