@@ -45,7 +45,10 @@ app.use(cors({
     if (allowedOrigins.has(normalized)) return callback(null, true);
     return callback(new Error('CORS origin denied'));
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'HEAD', 'PUT', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'Content-Type']
 }));
 app.use(express.json({ limit: '10mb' }));
 
