@@ -165,8 +165,9 @@ const uploadCoverMiddleware = (req, res, next) => {
   });
 };
 
-// PUT /api/tracks/:id/cover — сменить обложку у одобренного трека (ИИ по имени файла → иначе на модерацию)
-router.put('/:id/cover', protect, [param('id').isMongoId()], uploadCoverMiddleware, async (req, res) => {
+// PUT/POST /api/tracks/:id/cover — сменить обложку (POST дублирует PUT: часть прокси/Vercel криво прокидывает PUT+multipart)
+const coverReplaceStack = [protect, [param('id').isMongoId()], uploadCoverMiddleware];
+async function handleCoverReplace(req, res) {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -202,7 +203,9 @@ router.put('/:id/cover', protect, [param('id').isMongoId()], uploadCoverMiddlewa
   } catch (err) {
     res.status(500).json({ message: err.message || 'Не удалось обновить обложку' });
   }
-});
+}
+router.put('/:id/cover', ...coverReplaceStack, handleCoverReplace);
+router.post('/:id/cover', ...coverReplaceStack, handleCoverReplace);
 
 // POST /api/tracks — загрузка (авторизованный пользователь)
 router.post('/', protect, uploadTrackFiles, [
