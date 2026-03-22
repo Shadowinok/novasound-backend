@@ -39,14 +39,19 @@ const uploadTrackFiles = (req, res, next) => {
   });
 };
 
-/** Та же логика «ИИ», что и у названия трека: подозрительное имя файла → модерация обложки */
+/**
+ * Подозрительное имя файла → модерация обложки.
+ * Не используем простой .includes('sex') — иначе ложные срабатывания (sussex.jpg и т.п.).
+ */
 function coverFilenameSuspicious(originalname = '') {
-  const name = String(originalname).toLowerCase();
-  const suspiciousKeywords = [
-    'порно', 'sex', '18+', 'наркот', 'суицид', 'взрыв', 'бомб', 'убий', 'убийство',
-    'расизм', 'нацизм', 'экстрем', 'террор', 'докс', 'угроз', 'hate', 'самоуб', 'порн', 'xxx'
+  const full = String(originalname).toLowerCase();
+  const base = full.replace(/\.[^.]+$/, '');
+  const cyrAndLong = [
+    'порно', '18+', 'наркот', 'суицид', 'взрыв', 'бомб', 'убий', 'убийство',
+    'расизм', 'нацизм', 'экстрем', 'террор', 'докс', 'угроз', 'самоуб', 'порн', 'xxx'
   ];
-  return suspiciousKeywords.some((k) => name.includes(k));
+  if (cyrAndLong.some((k) => full.includes(k))) return true;
+  return /\b(sex|hate)\b/i.test(base);
 }
 
 function classifyReportText(text = '') {
