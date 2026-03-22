@@ -23,6 +23,11 @@ const playlistSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  /** false = только владелец (и админ) видит в каталоге и на главной */
+  isPublic: {
+    type: Boolean,
+    default: true
   }
 }, { timestamps: true });
 
