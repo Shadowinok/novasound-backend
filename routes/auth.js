@@ -166,7 +166,7 @@ router.post('/login', loginLimiter, [
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     const user = await User.findOne({ email: req.body.email }).select('+password');
     if (!user || !(await user.comparePassword(req.body.password))) {
-      return res.status(401).json({ message: 'Неверный email или пароль' });
+      return res.status(401).json({ message: 'Неверный логин или пароль. Проверьте email и пароль.' });
     }
     if (user.isBlocked) return res.status(403).json({ message: 'Аккаунт заблокирован' });
     if (!user.emailVerified) {
