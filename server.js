@@ -15,6 +15,8 @@ connectDB();
 initGridFS();
 
 const app = express();
+// Render / Vercel за прокси — чтобы rate limit видел реальный IP клиента
+app.set('trust proxy', 1);
 const normalizeOrigin = (v) => String(v || '').trim().replace(/\/$/, '');
 const primaryFrontend = normalizeOrigin(process.env.FRONTEND_URL);
 const legacyFrontend = 'https://novasound.vercel.app';
