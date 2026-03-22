@@ -172,6 +172,16 @@ async function handleCoverReplace(req, res) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     if (!req.file) return res.status(400).json({ message: 'Выберите файл обложки' });
+    const cfg = cloudinary.config();
+    if (!cfg.cloud_name || !cfg.api_key || !cfg.api_secret) {
+      return res.status(503).json({
+        message:
+          'На сервере не заданы ключи Cloudinary. В Render добавь CLOUDINARY_URL (cloudinary://...) или три переменные CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET и перезапусти деплой.'
+      });
+    }
+    if (!req.file.buffer || !req.file.buffer.length) {
+      return res.status(400).json({ message: 'Файл пустой или не прочитался — выберите другой jpg/png/webp' });
+    }
     const track = await Track.findById(req.params.id);
     if (!track) return res.status(404).json({ message: 'Трек не найден' });
     if (track.author.toString() !== req.user._id.toString()) {
@@ -182,7 +192,7 @@ async function handleCoverReplace(req, res) {
     }
     const result = await new Promise((resolve, reject) => {
       cloudinary.uploader.upload_stream(
-        { folder: 'novasound/covers', resource_type: 'image' },
+        { folder: 'novasound/covers', resource_type: 'auto' },
         (err, r) => (err ? reject(err) : resolve(r))
       ).end(req.file.buffer);
     });
@@ -201,7 +211,23 @@ async function handleCoverReplace(req, res) {
     const populated = await Track.findById(track._id).populate('author', 'username').lean();
     res.json(populated);
   } catch (err) {
-    res.status(500).json({ message: err.message || 'Не удалось обновить обложку' });
+    if (err.name === 'ValidationError') {
+      const msgs = Object.values(err.errors || {})
+        .map((e) => e.message)
+        .join('; ');
+      return res.status(400).json({ message: msgs || err.message });
+    }
+    console.error('[cover upload]', err);
+    const msg = err?.message || String(err);
+    const httpCode = err?.http_code || err?.error?.http_code;
+    res.status(500).json({
+      message: msg,
+      code: httpCode,
+      hint:
+        httpCode === 401
+          ? 'Неверный API Key/Secret в Render — перепроверь переменные Cloudinary.'
+          : undefined
+    });
   }
 }
 router.put('/:id/cover', ...coverReplaceStack, handleCoverReplace);
