@@ -2,17 +2,32 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const Playlist = require('../models/Playlist');
 const Track = require('../models/Track');
-const { protect, adminOnly } = require('../middleware/auth');
+const { protect, adminOnly, optionalAuth } = require('../middleware/auth');
 const multer = require('multer');
 const cloudinary = require('../config/cloudinary');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-// GET /api/playlists — все плейлисты (только с одобренными треками в выдаче)
-router.get('/', async (req, res) => {
+const publicPlaylistFilter = () => ({
+  $or: [{ isPublic: true }, { isPublic: { $exists: false } }]
+});
+
+function canViewPrivatePlaylist(playlist, user) {
+  if (playlist.isPublic !== false) return true;
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const uid = user._id?.toString?.() || String(user._id);
+  const owner = playlist.createdBy?._id?.toString?.() || playlist.createdBy?.toString?.() || String(playlist.createdBy);
+  return uid === owner;
+}
+
+// GET /api/playlists — в каталоге только публичные; админ видит все
+router.get('/', optionalAuth, async (req, res) => {
   try {
-    const playlists = await Playlist.find()
+    const isAdmin = req.user?.role === 'admin';
+    const query = isAdmin ? {} : publicPlaylistFilter();
+    const playlists = await Playlist.find(query)
       .populate('createdBy', 'username')
       .populate({ path: 'tracks', match: { status: 'approved' }, select: 'title coverImage author duration plays', populate: { path: 'author', select: 'username' } })
       .sort({ createdAt: -1 })
@@ -23,21 +38,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/playlists/:id
-router.get('/:id', async (req, res) => {
-  try {
-    const playlist = await Playlist.findById(req.params.id)
-      .populate('createdBy', 'username')
-      .populate({ path: 'tracks', match: { status: 'approved' }, populate: { path: 'author', select: 'username' } })
-      .lean();
-    if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
-    res.json(playlist);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// GET /api/playlists/my — плейлисты текущего пользователя
+// GET /api/playlists/my/list — до /:id, чтобы не перехватывалось как id
 router.get('/my/list', protect, async (req, res) => {
   try {
     const playlists = await Playlist.find({ createdBy: req.user._id })
@@ -51,7 +52,24 @@ router.get('/my/list', protect, async (req, res) => {
   }
 });
 
-// POST /api/playlists/my — создать свой плейлист
+// GET /api/playlists/:id — приватный только для владельца и админа
+router.get('/:id', optionalAuth, async (req, res) => {
+  try {
+    const playlist = await Playlist.findById(req.params.id)
+      .populate('createdBy', 'username')
+      .populate({ path: 'tracks', match: { status: 'approved' }, populate: { path: 'author', select: 'username' } })
+      .lean();
+    if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (!canViewPrivatePlaylist(playlist, req.user)) {
+      return res.status(404).json({ message: 'Плейлист не найден' });
+    }
+    res.json(playlist);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/playlists/my — создать свой плейлист (по умолчанию приватный; в каталог — только если isPublic: true)
 router.post('/my', protect, [
   body('title').trim().isLength({ min: 1, max: 100 }).withMessage('Название 1-100 символов'),
   body('description').optional().trim().isLength({ max: 1000 })
@@ -59,15 +77,64 @@ router.post('/my', protect, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const isPublic = req.body.isPublic === true || req.body.isPublic === 'true';
     const playlist = await Playlist.create({
       title: req.body.title,
       description: req.body.description || '',
       coverImage: '',
       tracks: [],
-      createdBy: req.user._id
+      createdBy: req.user._id,
+      isPublic
     });
     const populated = await Playlist.findById(playlist._id).populate('createdBy', 'username').populate('tracks', 'title coverImage author duration').lean();
     res.status(201).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PUT /api/playlists/my/:id — владелец: название, описание, публичность
+router.put('/my/:id', protect, [
+  param('id').isMongoId(),
+  body('title').optional().trim().isLength({ min: 1, max: 100 }),
+  body('description').optional().trim().isLength({ max: 1000 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const playlist = await Playlist.findById(req.params.id);
+    if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (playlist.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Доступ запрещён' });
+    }
+    if (req.body.title !== undefined) playlist.title = req.body.title;
+    if (req.body.description !== undefined) playlist.description = req.body.description;
+    if (req.body.isPublic !== undefined) {
+      playlist.isPublic = req.body.isPublic === true || req.body.isPublic === 'true';
+    }
+    await playlist.save();
+    const populated = await Playlist.findById(playlist._id)
+      .populate('createdBy', 'username')
+      .populate({ path: 'tracks', match: { status: 'approved' }, populate: { path: 'author', select: 'username' } })
+      .lean();
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE /api/playlists/my/:id — владелец удаляет свой плейлист
+router.delete('/my/:id', protect, [param('id').isMongoId()], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const playlist = await Playlist.findById(req.params.id);
+    if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (playlist.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Доступ запрещён' });
+    }
+    await Playlist.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Плейлист удалён' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -142,7 +209,8 @@ router.post('/', protect, adminOnly, upload.single('cover'), [
       description: req.body.description || '',
       coverImage,
       tracks: tracks.filter(Boolean),
-      createdBy: req.user._id
+      createdBy: req.user._id,
+      isPublic: true
     });
     const populated = await Playlist.findById(playlist._id).populate('createdBy', 'username').populate('tracks', 'title coverImage author duration').lean();
     res.status(201).json(populated);
