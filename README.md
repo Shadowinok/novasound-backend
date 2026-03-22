@@ -2,6 +2,8 @@
 
 Node.js (Express), API.
 
+**Все переменные окружения (обязательные и необязательные):** см. [`ENV_REFERENCE.md`](./ENV_REFERENCE.md).
+
 ## Запуск локально
 
 ```bash
