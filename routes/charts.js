@@ -19,11 +19,15 @@ const getChart = async (startDate) => {
     .lean();
   const byId = {};
   tracks.forEach(t => { byId[t._id.toString()] = t; });
-  return logs.map((l, i) => ({
-    ...byId[l._id.toString()],
-    rank: i + 1,
-    playsInPeriod: l.count
-  })).filter(Boolean);
+  // Удалённые треки есть в ListenLog, но не в Track — не показывать «пустые» карточки
+  return logs
+    .map((l) => {
+      const t = byId[l._id.toString()];
+      if (!t) return null;
+      return { ...t, playsInPeriod: l.count };
+    })
+    .filter(Boolean)
+    .map((t, i) => ({ ...t, rank: i + 1 }));
 };
 
 // GET /api/charts/weekly

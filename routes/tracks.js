@@ -550,6 +550,7 @@ router.delete('/:id', protect, async (req, res) => {
     try {
       await gridfsBucket.delete(track.audioFileId);
     } catch (_) {}
+    await ListenLog.deleteMany({ track: track._id });
     await Track.findByIdAndDelete(req.params.id);
     res.json({ message: 'Трек удалён' });
   } catch (err) {
