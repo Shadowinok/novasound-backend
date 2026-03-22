@@ -40,6 +40,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  /** Последняя отправка письма подтверждения (регистрация / повтор) — для кулдауна */
+  lastVerificationEmailAt: {
+    type: Date,
+    default: null
+  },
   isBlocked: {
     type: Boolean,
     default: false

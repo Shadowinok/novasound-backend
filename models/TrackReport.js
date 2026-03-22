@@ -4,6 +4,13 @@ const trackReportSchema = new mongoose.Schema(
   {
     track: { type: mongoose.Schema.Types.ObjectId, ref: 'Track', required: true, index: true },
     reporter: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** content — жалоба на трек/текст; cover — на обложку */
+    reportType: {
+      type: String,
+      enum: ['content', 'cover'],
+      default: 'content',
+      index: true
+    },
     text: { type: String, required: true, trim: true, maxlength: 2000 },
     reasonCategory: {
       type: String,
@@ -27,7 +34,7 @@ const trackReportSchema = new mongoose.Schema(
     },
     adminAction: {
       type: String,
-      enum: ['leave', 'rejectTrack', 'none'],
+      enum: ['leave', 'rejectTrack', 'rejectCover', 'none'],
       default: 'none'
     },
     moderationComment: { type: String, default: '' },
@@ -37,9 +44,9 @@ const trackReportSchema = new mongoose.Schema(
 );
 
 trackReportSchema.index({ status: 1, createdAt: -1 });
-// Один пользователь не должен иметь несколько одновременно открытых жалоб на один трек
+// Одна открытая жалоба на трек на пользователя по типу (контент / обложка)
 trackReportSchema.index(
-  { track: 1, reporter: 1, status: 1 },
+  { track: 1, reporter: 1, status: 1, reportType: 1 },
   { unique: true, partialFilterExpression: { status: 'open' } }
 );
 

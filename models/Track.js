@@ -25,6 +25,22 @@ const trackSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  /** Новая обложка на проверке (публично ещё старая coverImage) */
+  coverImagePending: {
+    type: String,
+    default: ''
+  },
+  /** none | pending — после ИИ/админа снова none */
+  coverChangeStatus: {
+    type: String,
+    enum: ['none', 'pending'],
+    default: 'none',
+    index: true
+  },
+  coverModerationComment: {
+    type: String,
+    default: ''
+  },
   duration: {
     type: Number,
     required: true,
