@@ -77,5 +77,17 @@ app.use('/api/users', usersRoutes);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+/** Диагностика: открой в браузере — должно быть configured: true и cloudName: твой cloud */
+app.get('/health/cloudinary', (req, res) => {
+  const cloudinary = require('./config/cloudinary');
+  const cfg = cloudinary.config();
+  const configured = !!(cfg && cfg.cloud_name && cfg.api_key && cfg.api_secret);
+  res.json({
+    ok: true,
+    cloudinaryConfigured: configured,
+    cloudName: configured ? cfg.cloud_name : null
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`NovaSound API running on port ${PORT}`));
