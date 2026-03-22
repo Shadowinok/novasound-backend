@@ -1,0 +1,21 @@
+# NovaSound — бэкенд
+
+Node.js (Express), API.
+
+## Запуск локально
+
+```bash
+npm install
+```
+
+Скопируй `.env.example` → `.env`, заполни MongoDB, JWT, почту и т.д.
+
+```bash
+npm start
+```
+
+Для разработки с автоперезапуском: `npm run dev` (если стоит nodemon).
+
+## В Git не класть
+
+`node_modules/`, `.env` (секреты).
