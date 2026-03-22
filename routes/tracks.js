@@ -11,6 +11,12 @@ const { getGridFS } = require('../config/gridfs');
 const cloudinary = require('../config/cloudinary');
 const { parseBuffer } = require('music-metadata');
 const TrackReport = require('../models/TrackReport');
+const {
+  trackUploadIpLimiter,
+  trackUploadUserLimiter,
+  coverReplaceIpLimiter,
+  coverReplaceUserLimiter
+} = require('../middleware/rateLimits');
 
 const router = express.Router();
 
@@ -166,7 +172,13 @@ const uploadCoverMiddleware = (req, res, next) => {
 };
 
 // PUT/POST /api/tracks/:id/cover — сменить обложку (POST дублирует PUT: часть прокси/Vercel криво прокидывает PUT+multipart)
-const coverReplaceStack = [protect, [param('id').isMongoId()], uploadCoverMiddleware];
+const coverReplaceStack = [
+  protect,
+  coverReplaceIpLimiter,
+  coverReplaceUserLimiter,
+  [param('id').isMongoId()],
+  uploadCoverMiddleware
+];
 async function handleCoverReplace(req, res) {
   try {
     const errors = validationResult(req);
@@ -267,7 +279,7 @@ router.put('/:id/cover', ...coverReplaceStack, handleCoverReplace);
 router.post('/:id/cover', ...coverReplaceStack, handleCoverReplace);
 
 // POST /api/tracks — загрузка (авторизованный пользователь)
-router.post('/', protect, uploadTrackFiles, [
+router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
   body('description').optional().trim().isLength({ max: 2000 })
 ], async (req, res) => {
