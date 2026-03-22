@@ -145,7 +145,7 @@ router.get('/track-reports', async (req, res) => {
   try {
     const { status = 'open' } = req.query;
     const reports = await TrackReport.find({ status, escalatedToAdmin: true })
-      .populate('track', 'title coverImage author status')
+      .populate('track', 'title coverImage coverImagePending author status')
       .populate('reporter', 'username email')
       .sort({ createdAt: -1 })
       .lean();
@@ -168,7 +168,7 @@ router.get('/track-reports', async (req, res) => {
 // PUT /api/admin/track-reports/:reportId/resolve — решение админа
 router.put('/track-reports/:reportId/resolve', [
   param('reportId').isMongoId(),
-  body('action').isIn(['leave', 'rejectTrack']).withMessage('action должен быть leave или rejectTrack'),
+  body('action').isIn(['leave', 'rejectTrack', 'rejectCover']).withMessage('action: leave, rejectTrack или rejectCover'),
   body('adminComment').optional().trim().isLength({ max: 2000 })
 ], async (req, res) => {
   try {
@@ -178,10 +178,24 @@ router.put('/track-reports/:reportId/resolve', [
     const report = await TrackReport.findById(reportId).populate('reporter', 'email username');
     if (!report) return res.status(404).json({ message: 'Жалоба не найдена' });
     if (report.status !== 'open') return res.status(400).json({ message: 'Жалоба уже обработана' });
+    if (action === 'rejectCover' && report.reportType !== 'cover') {
+      return res.status(400).json({ message: 'rejectCover только для жалоб на обложку' });
+    }
 
     let affectedTrackTitle = '';
     let affectedTrackAuthorEmail = '';
-    if (action === 'rejectTrack') {
+    if (action === 'rejectCover') {
+      const tr = await Track.findById(report.track).populate('author', 'email username');
+      if (tr) {
+        affectedTrackTitle = tr.title;
+        affectedTrackAuthorEmail = tr.author?.email || '';
+        tr.coverImage = '';
+        tr.coverImagePending = '';
+        tr.coverChangeStatus = 'none';
+        tr.coverModerationComment = adminComment || 'Обложка удалена по жалобе';
+        await tr.save();
+      }
+    } else if (action === 'rejectTrack') {
       const track = await Track.findById(report.track).populate('author', 'email username');
       if (track) {
         affectedTrackTitle = track.title;
@@ -234,7 +248,7 @@ router.put('/track-reports/:reportId/resolve', [
     }
 
     report.status = 'resolved';
-    report.adminAction = action === 'rejectTrack' ? 'rejectTrack' : 'leave';
+    report.adminAction = action === 'rejectTrack' ? 'rejectTrack' : action === 'rejectCover' ? 'rejectCover' : 'leave';
     report.moderationComment = adminComment || report.moderationComment || '';
     report.resolvedBy = req.user._id;
     await report.save();
@@ -289,6 +303,65 @@ router.get('/tracks/pending', async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
     res.json(tracks);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET /api/admin/tracks/cover-pending — обложки на проверке после «подозрительного» ИИ
+router.get('/tracks/cover-pending', async (req, res) => {
+  try {
+    const tracks = await Track.find({ status: 'approved', coverChangeStatus: 'pending', coverImagePending: { $ne: '' } })
+      .populate('author', 'username email')
+      .sort({ updatedAt: -1 })
+      .lean();
+    res.json(tracks);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PUT /api/admin/tracks/:id/cover/approve — опубликовать новую обложку
+router.put('/tracks/:id/cover/approve', [param('id').isMongoId()], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const track = await Track.findById(req.params.id);
+    if (!track) return res.status(404).json({ message: 'Трек не найден' });
+    if (track.coverChangeStatus !== 'pending' || !track.coverImagePending) {
+      return res.status(400).json({ message: 'Нет обложки на модерации' });
+    }
+    track.coverImage = track.coverImagePending;
+    track.coverImagePending = '';
+    track.coverChangeStatus = 'none';
+    track.coverModerationComment = '';
+    await track.save();
+    const populated = await Track.findById(track._id).populate('author', 'username').lean();
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PUT /api/admin/tracks/:id/cover/reject — отклонить новую обложку (старая остаётся)
+router.put('/tracks/:id/cover/reject', [
+  param('id').isMongoId(),
+  body('comment').optional().trim().isLength({ max: 500 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const track = await Track.findById(req.params.id);
+    if (!track) return res.status(404).json({ message: 'Трек не найден' });
+    if (track.coverChangeStatus !== 'pending') {
+      return res.status(400).json({ message: 'Нет обложки на модерации' });
+    }
+    track.coverImagePending = '';
+    track.coverChangeStatus = 'none';
+    track.coverModerationComment = req.body.comment || 'Обложка отклонена модератором';
+    await track.save();
+    const populated = await Track.findById(track._id).populate('author', 'username').lean();
+    res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

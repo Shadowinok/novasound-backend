@@ -32,6 +32,7 @@ router.post('/register', [
     }
     const exists = await User.findOne({ $or: [{ email }, { username }] });
     if (exists) return res.status(400).json({ message: 'Email или имя уже заняты' });
+
     const verifyToken = createEmailVerifyToken();
     const verifyTokenHash = hashToken(verifyToken);
     const user = await User.create({
@@ -42,7 +43,8 @@ router.post('/register', [
       termsVersion: process.env.TERMS_VERSION || '1.0.0',
       emailVerified: false,
       emailVerifyTokenHash: verifyTokenHash,
-      emailVerifyExpires: new Date(Date.now() + 1000 * 60 * 60 * 24)
+      emailVerifyExpires: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      lastVerificationEmailAt: new Date()
     });
 
     const frontendUrl = process.env.FRONTEND_URL;
@@ -65,9 +67,68 @@ router.post('/register', [
       `
     });
 
-    res.status(201).json({ message: 'Письмо с подтверждением отправлено. Проверьте почту.' });
+    res.status(201).json({
+      message: 'Письмо с подтверждением отправлено. Проверьте почту.',
+      email: user.email
+    });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка регистрации' });
+  }
+});
+
+const resendCooldownMs = () =>
+  Number(process.env.EMAIL_RESEND_COOLDOWN_MINUTES || 5) * 60 * 1000;
+
+// POST /api/auth/resend-verification — повторить письмо (кулдаун в минутах, см. EMAIL_RESEND_COOLDOWN_MINUTES)
+router.post('/resend-verification', [body('email').isEmail().normalizeEmail()], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const { email } = req.body;
+    const user = await User.findOne({ email }).select('+emailVerifyTokenHash');
+    if (!user) return res.status(404).json({ message: 'Пользователь с таким email не найден' });
+    if (user.emailVerified) return res.status(400).json({ message: 'Email уже подтверждён' });
+
+    const cooldown = resendCooldownMs();
+    const last = user.lastVerificationEmailAt ? new Date(user.lastVerificationEmailAt).getTime() : 0;
+    const wait = cooldown - (Date.now() - last);
+    if (last && wait > 0) {
+      const mins = Math.ceil(wait / 60000);
+      return res.status(429).json({
+        message: `Повторная отправка возможна через ${mins} мин.`,
+        retryAfterSec: Math.ceil(wait / 1000)
+      });
+    }
+
+    const verifyToken = createEmailVerifyToken();
+    user.emailVerifyTokenHash = hashToken(verifyToken);
+    user.emailVerifyExpires = new Date(Date.now() + 1000 * 60 * 60 * 24);
+    user.lastVerificationEmailAt = new Date();
+    await user.save();
+
+    const frontendUrl = process.env.FRONTEND_URL;
+    if (!frontendUrl) {
+      return res.status(500).json({ message: 'FRONTEND_URL is not configured' });
+    }
+    const verifyUrl = `${frontendUrl.replace(/\/$/, '')}/verify-email?token=${verifyToken}`;
+
+    await sendEmail({
+      to: user.email,
+      subject: 'NovaSound — подтвердите email',
+      text: `Подтвердите email: ${verifyUrl}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.5">
+          <h2>Подтверждение email</h2>
+          <p>Нажмите, чтобы подтвердить ваш email в NovaSound:</p>
+          <p><a href="${verifyUrl}">Подтвердить email</a></p>
+          <p>Ссылка действительна 24 часа.</p>
+        </div>
+      `
+    });
+
+    res.json({ message: 'Письмо отправлено повторно' });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка отправки' });
   }
 });
 
@@ -107,7 +168,13 @@ router.post('/login', [
       return res.status(401).json({ message: 'Неверный email или пароль' });
     }
     if (user.isBlocked) return res.status(403).json({ message: 'Аккаунт заблокирован' });
-    if (!user.emailVerified) return res.status(403).json({ message: 'Подтвердите email перед входом' });
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        message: 'Сначала подтвердите email по ссылке из письма',
+        needsVerification: true,
+        email: user.email
+      });
+    }
     const token = generateToken(user._id);
     res.json({
       token,

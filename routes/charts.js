@@ -14,6 +14,7 @@ const getChart = async (startDate) => {
   ]);
   const trackIds = logs.map(l => l._id);
   const tracks = await Track.find({ _id: { $in: trackIds }, status: 'approved' })
+    .select('-coverImagePending -coverChangeStatus -coverModerationComment')
     .populate('author', 'username')
     .lean();
   const byId = {};
@@ -53,6 +54,7 @@ router.get('/monthly', async (req, res) => {
 router.get('/alltime', async (req, res) => {
   try {
     const tracks = await Track.find({ status: 'approved' })
+      .select('-coverImagePending -coverChangeStatus -coverModerationComment')
       .populate('author', 'username')
       .sort({ plays: -1 })
       .limit(50)

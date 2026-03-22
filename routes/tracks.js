@@ -39,6 +39,16 @@ const uploadTrackFiles = (req, res, next) => {
   });
 };
 
+/** Та же логика «ИИ», что и у названия трека: подозрительное имя файла → модерация обложки */
+function coverFilenameSuspicious(originalname = '') {
+  const name = String(originalname).toLowerCase();
+  const suspiciousKeywords = [
+    'порно', 'sex', '18+', 'наркот', 'суицид', 'взрыв', 'бомб', 'убий', 'убийство',
+    'расизм', 'нацизм', 'экстрем', 'террор', 'докс', 'угроз', 'hate', 'самоуб', 'порн', 'xxx'
+  ];
+  return suspiciousKeywords.some((k) => name.includes(k));
+}
+
 function classifyReportText(text = '') {
   const t = String(text).toLowerCase();
   const groups = {
@@ -95,6 +105,7 @@ router.get('/', async (req, res) => {
       { description: new RegExp(search, 'i') }
     ];
     const tracks = await Track.find(query)
+      .select('-coverImagePending -coverChangeStatus -coverModerationComment')
       .populate('author', 'username')
       .sort(sort)
       .skip((page - 1) * limit)
@@ -112,6 +123,7 @@ router.get('/latest', async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(Number(req.query.limit) || 12, 50));
     const tracks = await Track.find({ status: 'approved' })
+      .select('-coverImagePending -coverChangeStatus -coverModerationComment')
       .populate('author', 'username')
       .sort({ createdAt: -1 })
       .limit(limit)
@@ -148,7 +160,7 @@ const uploadCoverMiddleware = (req, res, next) => {
   });
 };
 
-// PUT /api/tracks/:id/cover — сменить обложку у одобренного трека (без повторной модерации)
+// PUT /api/tracks/:id/cover — сменить обложку у одобренного трека (ИИ по имени файла → иначе на модерацию)
 router.put('/:id/cover', protect, [param('id').isMongoId()], uploadCoverMiddleware, async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -168,7 +180,17 @@ router.put('/:id/cover', protect, [param('id').isMongoId()], uploadCoverMiddlewa
         (err, r) => (err ? reject(err) : resolve(r))
       ).end(req.file.buffer);
     });
-    track.coverImage = result.secure_url;
+    const suspicious = coverFilenameSuspicious(req.file.originalname);
+    if (suspicious) {
+      track.coverImagePending = result.secure_url;
+      track.coverChangeStatus = 'pending';
+      track.coverModerationComment = 'Подозрительное имя файла обложки — требуется проверка';
+    } else {
+      track.coverImage = result.secure_url;
+      track.coverImagePending = '';
+      track.coverChangeStatus = 'none';
+      track.coverModerationComment = '';
+    }
     await track.save();
     const populated = await Track.findById(track._id).populate('author', 'username').lean();
     res.json(populated);
@@ -315,24 +337,34 @@ router.post('/', protect, uploadTrackFiles, [
 // POST /api/tracks/:id/report — пожаловаться на трек (не скрываем трек сразу)
 router.post('/:id/report', protect, [
   param('id').isMongoId(),
-  body('text').trim().isLength({ min: 10, max: 2000 }).withMessage('Укажите описание жалобы (10-2000 символов)')
+  body('text').trim().isLength({ min: 10, max: 2000 }).withMessage('Укажите описание жалобы (10-2000 символов)'),
+  body('reportType').optional().isIn(['content', 'cover'])
 ], async (req, res) => {
   try {
     const { id } = req.params;
     const { text } = req.body;
+    const reportType = req.body.reportType === 'cover' ? 'cover' : 'content';
 
-    const track = await Track.findById(id).select('author status');
+    const track = await Track.findById(id).select('author status coverImage');
     if (!track) return res.status(404).json({ message: 'Трек не найден' });
     // Жаловаться имеет смысл на уже доступные треки
     if (track.status !== 'approved') return res.status(400).json({ message: 'Жалобы принимаются только для одобренных треков' });
+    if (reportType === 'cover' && !track.coverImage) {
+      return res.status(400).json({ message: 'У трека нет обложки для этой жалобы' });
+    }
 
     const existingOpen = await TrackReport.findOne({
       track: track._id,
       reporter: req.user._id,
-      status: 'open'
+      status: 'open',
+      reportType
     }).select('_id');
     if (existingOpen) {
-      return res.status(400).json({ message: 'У вас уже есть открытая жалоба на этот трек' });
+      return res.status(400).json({
+        message: reportType === 'cover'
+          ? 'У вас уже есть открытая жалоба на обложку этого трека'
+          : 'У вас уже есть открытая жалоба на этот трек'
+      });
     }
 
     const { isSerious, category } = classifyReportText(text);
@@ -346,7 +378,8 @@ router.post('/:id/report', protect, [
       track: track._id,
       reporter: req.user._id,
       reasonCategory: category,
-      isSerious: true
+      isSerious: true,
+      reportType
     });
     const attemptNumber = priorSeriousCount + 1;
     const escalatedToAdmin = attemptNumber >= 4;
@@ -356,6 +389,7 @@ router.post('/:id/report', protect, [
     const report = await TrackReport.create({
       track: track._id,
       reporter: req.user._id,
+      reportType,
       text,
       aiSuggestedAction,
       reasonCategory: category,
@@ -366,14 +400,14 @@ router.post('/:id/report', protect, [
       adminAction: escalatedToAdmin ? 'none' : 'leave',
       moderationComment: escalatedToAdmin
         ? ''
-        : `Автообработка ИИ: жалоба зафиксирована как попытка #${attemptNumber}/4. До эскалации админу нужно 4 обращения по серьёзной причине.`
+        : `Автообработка ИИ: жалоба (${reportType === 'cover' ? 'обложка' : 'контент'}) #${attemptNumber}/4. На 4-й эскалация админу.`
     });
 
     res.status(201).json({
       ...report.toObject(),
       message: escalatedToAdmin
         ? 'Жалоба эскалирована администратору'
-        : `Жалоба обработана ИИ (попытка ${attemptNumber}/4). Админу уйдёт на 4-й серьёзной жалобе`
+        : `Жалоба обработана ИИ (попытка ${attemptNumber}/4). Админу — на 4-й по этой категории`
     });
   } catch (err) {
     if (err?.code === 11000) {
@@ -384,12 +418,20 @@ router.post('/:id/report', protect, [
 });
 
 // GET /api/tracks/:id — один трек (для плеера и страницы)
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const track = await Track.findById(req.params.id).populate('author', 'username').lean();
     if (!track) return res.status(404).json({ message: 'Трек не найден' });
     if (track.status !== 'approved' && (!req.user || (req.user._id.toString() !== track.author._id?.toString() && req.user.role !== 'admin'))) {
       return res.status(404).json({ message: 'Трек не найден' });
+    }
+    const authorId = track.author?._id?.toString?.() || track.author?.toString?.();
+    const isAuthorOrAdmin =
+      (req.user && authorId === req.user._id.toString()) || req.user?.role === 'admin';
+    if (!isAuthorOrAdmin) {
+      delete track.coverImagePending;
+      delete track.coverModerationComment;
+      track.coverChangeStatus = 'none';
     }
     res.json(track);
   } catch (err) {
