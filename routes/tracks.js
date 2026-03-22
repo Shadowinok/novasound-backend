@@ -190,12 +190,33 @@ async function handleCoverReplace(req, res) {
     if (track.status !== 'approved') {
       return res.status(400).json({ message: 'Обложку так можно менять только у одобренных треков' });
     }
-    const result = await new Promise((resolve, reject) => {
-      cloudinary.uploader.upload_stream(
-        { folder: 'novasound/covers', resource_type: 'auto' },
-        (err, r) => (err ? reject(err) : resolve(r))
-      ).end(req.file.buffer);
-    });
+    // upload_stream на части хостингов (Render) иногда падает; upload + data URI стабильнее для файлов до 5 МБ
+    const mime = req.file.mimetype || 'image/jpeg';
+    const dataUri = `data:${mime};base64,${req.file.buffer.toString('base64')}`;
+    let result;
+    try {
+      result = await new Promise((resolve, reject) => {
+        cloudinary.uploader.upload(
+          dataUri,
+          { folder: 'novasound/covers', resource_type: 'auto' },
+          (err, r) => (err ? reject(err) : resolve(r))
+        );
+      });
+    } catch (uploadErr) {
+      const cmsg =
+        uploadErr?.error?.message ||
+        uploadErr?.message ||
+        (typeof uploadErr?.error === 'string' ? uploadErr.error : '') ||
+        String(uploadErr);
+      console.error('[cover cloudinary]', cmsg, uploadErr);
+      return res.status(502).json({
+        message: `Cloudinary: ${cmsg}`,
+        step: 'upload'
+      });
+    }
+    if (!result?.secure_url) {
+      return res.status(502).json({ message: 'Cloudinary не вернул ссылку на файл', step: 'upload' });
+    }
     const suspicious = coverFilenameSuspicious(req.file.originalname);
     if (suspicious) {
       track.coverImagePending = result.secure_url;
@@ -207,7 +228,15 @@ async function handleCoverReplace(req, res) {
       track.coverChangeStatus = 'none';
       track.coverModerationComment = '';
     }
-    await track.save();
+    try {
+      await track.save();
+    } catch (saveErr) {
+      console.error('[cover save]', saveErr);
+      return res.status(500).json({
+        message: saveErr?.message || 'Ошибка сохранения трека в базу',
+        step: 'database'
+      });
+    }
     const populated = await Track.findById(track._id).populate('author', 'username').lean();
     res.json(populated);
   } catch (err) {
@@ -218,7 +247,11 @@ async function handleCoverReplace(req, res) {
       return res.status(400).json({ message: msgs || err.message });
     }
     console.error('[cover upload]', err);
-    const msg = err?.message || String(err);
+    const msg =
+      err?.error?.message ||
+      err?.message ||
+      (typeof err?.error === 'string' ? err.error : '') ||
+      String(err);
     const httpCode = err?.http_code || err?.error?.http_code;
     res.status(500).json({
       message: msg,
