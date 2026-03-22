@@ -6,6 +6,7 @@ const User = require('../models/User');
 const { protect } = require('../middleware/auth');
 const { containsProfanity } = require('../utils/profanityFilter');
 const { sendEmail } = require('../utils/email');
+const { registerLimiter, loginLimiter, resendLimiter } = require('../middleware/rateLimits');
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ const createEmailVerifyToken = () => crypto.randomBytes(32).toString('hex');
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 // POST /api/auth/register
-router.post('/register', [
+router.post('/register', registerLimiter, [
   body('username').trim().isLength({ min: 2, max: 50 }).withMessage('Имя пользователя 2-50 символов'),
   body('email').isEmail().normalizeEmail().withMessage('Некорректный email'),
   body('password').isLength({ min: 6 }).withMessage('Пароль минимум 6 символов'),
@@ -80,7 +81,7 @@ const resendCooldownMs = () =>
   Number(process.env.EMAIL_RESEND_COOLDOWN_MINUTES || 5) * 60 * 1000;
 
 // POST /api/auth/resend-verification — повторить письмо (кулдаун в минутах, см. EMAIL_RESEND_COOLDOWN_MINUTES)
-router.post('/resend-verification', [body('email').isEmail().normalizeEmail()], async (req, res) => {
+router.post('/resend-verification', resendLimiter, [body('email').isEmail().normalizeEmail()], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -156,7 +157,7 @@ router.get('/verify-email', async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', [
+router.post('/login', loginLimiter, [
   body('email').isEmail().normalizeEmail(),
   body('password').notEmpty()
 ], async (req, res) => {
