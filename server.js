@@ -43,16 +43,27 @@ const allowedOrigins = new Set(
     })
 );
 
+function originAllowed(origin) {
+  if (!origin) return true;
+  const normalized = normalizeOrigin(origin);
+  if (allowedOrigins.has(normalized)) return true;
+  try {
+    const u = new URL(origin);
+    const h = u.hostname.toLowerCase();
+    // Любой поддомен основного сайта (REG.RU часто отдаёт app. / m. и т.д.)
+    if (h === 'novasoundapp.ru' || h.endsWith('.novasoundapp.ru')) return true;
+  } catch (_) {}
+  return false;
+}
+
 app.use(cors({
   origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    const normalized = normalizeOrigin(origin);
-    if (allowedOrigins.has(normalized)) return callback(null, true);
+    if (originAllowed(origin)) return callback(null, true);
     return callback(new Error('CORS origin denied'));
   },
   credentials: true,
   methods: ['GET', 'HEAD', 'PUT', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With', 'Origin', 'Cache-Control'],
   exposedHeaders: ['Content-Length', 'Content-Type']
 }));
 app.use(express.json({ limit: '10mb' }));
