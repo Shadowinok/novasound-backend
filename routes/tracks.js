@@ -6,7 +6,7 @@ const Track = require('../models/Track');
 const ListenLog = require('../models/ListenLog');
 const { protect, optionalAuth, protectStream } = require('../middleware/auth');
 const { body, param, validationResult } = require('express-validator');
-const { containsProfanity } = require('../utils/profanityFilter');
+const { containsProfanity, containsSuspiciousContent } = require('../utils/profanityFilter');
 const { getGridFS } = require('../config/gridfs');
 const cloudinary = require('../config/cloudinary');
 const { parseBuffer } = require('music-metadata');
@@ -321,21 +321,14 @@ router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTr
     // Базовая (быстрая) AI-модерация по тексту: чистые треки сразу approved,
     // подозрительные — pending (админ посмотрит по жалобе/спорным случаям).
     // Аморальное/запрещенное реальными ИИ мы заменим позже, сейчас — детерминированные правила.
-    const textToModerate = `${title} ${description || ''}`.toLowerCase();
-    const suspiciousKeywords = [
-      'порно', 'sex', '18+', 'наркот', 'суицид', 'взрыв', 'бомб', 'убий', 'убийство',
-      'расизм', 'нацизм', 'экстрем', 'террор', 'докс', 'угроз', 'hate', 'самоуб'
-    ];
-    const hasProfanity = containsProfanity(textToModerate);
-    const hasSuspicious = suspiciousKeywords.some((k) => textToModerate.includes(k));
-    const moderationStatus = hasProfanity ? 'rejected' : hasSuspicious ? 'pending' : 'approved';
-    const moderationReason = hasProfanity
-      ? 'Недопустимое содержание в названии/описании'
-      : hasSuspicious
-        ? 'Подозрительный контент — требуется ручная проверка'
-        : '';
+    const textToModerate = `${title} ${description || ''}`;
+    const hasSuspicious = containsSuspiciousContent(textToModerate);
 
     let coverImage = '';
+    let coverImagePending = '';
+    let coverChangeStatus = 'none';
+    let coverModComment = '';
+
     if (req.files.cover?.[0]) {
       stage = 'cover-upload';
       const result = await new Promise((resolve, reject) => {
@@ -344,7 +337,14 @@ router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTr
           (err, result) => (err ? reject(err) : resolve(result))
         ).end(req.files.cover[0].buffer);
       });
-      coverImage = result.secure_url;
+      const suspCoverName = coverFilenameSuspicious(req.files.cover[0].originalname);
+      if (suspCoverName) {
+        coverImagePending = result.secure_url;
+        coverChangeStatus = 'pending';
+        coverModComment = 'Подозрительное имя файла обложки — требуется проверка';
+      } else {
+        coverImage = result.secure_url;
+      }
     } else {
       // Если пользователь не загрузил отдельную обложку — пытаемся взять embedded cover из аудио.
       stage = 'embedded-cover-extract';
@@ -364,6 +364,18 @@ router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTr
       } catch (_) {
         // Embedded cover опциональна: если не распарсилось — грузим трек без обложки.
       }
+    }
+
+    let moderationStatus = hasSuspicious ? 'pending' : 'approved';
+    let moderationReason = hasSuspicious
+      ? 'Подозрительный контент — требуется ручная проверка'
+      : '';
+
+    if (coverChangeStatus === 'pending') {
+      moderationStatus = 'pending';
+      moderationReason = moderationReason
+        ? `${moderationReason}; ${coverModComment}`
+        : coverModComment;
     }
 
     stage = 'gridfs-init';
@@ -391,12 +403,14 @@ router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTr
       author: req.user._id,
       audioFileId,
       coverImage,
+      coverImagePending,
+      coverChangeStatus,
+      coverModerationComment: coverChangeStatus === 'pending' ? coverModComment : '',
       duration,
       status: moderationStatus,
       moderationComment: moderationReason
     });
     if (moderationStatus === 'approved') track.approvedAt = new Date();
-    if (moderationStatus === 'rejected') track.rejectedAt = new Date();
     await track.save();
     stage = 'db-populate';
     const populated = await Track.findById(track._id).populate('author', 'username').lean();
@@ -461,32 +475,25 @@ router.post('/:id/report', protect, [
       reportType
     });
     const attemptNumber = priorSeriousCount + 1;
-    const escalatedToAdmin = attemptNumber >= 4;
-
-    const aiSuggestedAction = escalatedToAdmin ? 'needsManual' : 'leave';
 
     const report = await TrackReport.create({
       track: track._id,
       reporter: req.user._id,
       reportType,
       text,
-      aiSuggestedAction,
+      aiSuggestedAction: 'needsManual',
       reasonCategory: category,
       isSerious,
-      escalatedToAdmin,
+      escalatedToAdmin: true,
       attemptNumber,
-      status: escalatedToAdmin ? 'open' : 'resolved',
-      adminAction: escalatedToAdmin ? 'none' : 'leave',
-      moderationComment: escalatedToAdmin
-        ? ''
-        : `Автообработка ИИ: жалоба (${reportType === 'cover' ? 'обложка' : 'контент'}) #${attemptNumber}/4. На 4-й эскалация админу.`
+      status: 'open',
+      adminAction: 'none',
+      moderationComment: ''
     });
 
     res.status(201).json({
       ...report.toObject(),
-      message: escalatedToAdmin
-        ? 'Жалоба эскалирована администратору'
-        : `Жалоба обработана ИИ (попытка ${attemptNumber}/4). Админу — на 4-й по этой категории`
+      message: 'Жалоба передана модераторам'
     });
   } catch (err) {
     if (err?.code === 11000) {
@@ -541,6 +548,25 @@ router.put('/:id', protect, [
     if (description !== undefined) {
       if (containsProfanity(description)) return res.status(400).json({ message: 'Недопустимое описание' });
       track.description = description;
+    }
+    const textModerated = `${track.title} ${track.description || ''}`;
+    const suspicious = containsSuspiciousContent(textModerated);
+    const coverAwaiting =
+      track.coverChangeStatus === 'pending' && String(track.coverImagePending || '').trim() !== '';
+    if (suspicious) {
+      track.status = 'pending';
+      track.moderationComment = 'Подозрительный контент — требуется ручная проверка';
+      track.approvedAt = undefined;
+    } else if (coverAwaiting) {
+      track.status = 'pending';
+      if (!track.moderationComment) {
+        track.moderationComment = 'Ожидается проверка обложки администратором';
+      }
+      track.approvedAt = undefined;
+    } else {
+      track.status = 'approved';
+      track.moderationComment = '';
+      track.approvedAt = new Date();
     }
     await track.save();
     const populated = await Track.findById(track._id).populate('author', 'username').lean();

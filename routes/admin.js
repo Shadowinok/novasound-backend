@@ -140,18 +140,18 @@ router.delete('/users/:id', [
   }
 });
 
-// GET /api/admin/track-reports — очередь жалоб
+// GET /api/admin/track-reports — очередь жалоб (все открытые серьёзные жалобы, без «только с 4-й попытки»)
 router.get('/track-reports', async (req, res) => {
   try {
     const { status = 'open' } = req.query;
-    const reports = await TrackReport.find({ status, escalatedToAdmin: true })
+    const reports = await TrackReport.find({ status })
       .populate('track', 'title coverImage coverImagePending author status')
       .populate('reporter', 'username email')
       .sort({ createdAt: -1 })
       .lean();
     const trackIds = reports.map((r) => r.track?._id).filter(Boolean);
     const uniqCountsRaw = await TrackReport.aggregate([
-      { $match: { status: 'open', escalatedToAdmin: true, track: { $in: trackIds } } },
+      { $match: { status: 'open', track: { $in: trackIds } } },
       { $group: { _id: '$track', reporters: { $addToSet: '$reporter' } } },
       { $project: { uniqueReporters: { $size: '$reporters' } } }
     ]);
@@ -372,12 +372,19 @@ router.put('/tracks/:id/approve', [param('id').isMongoId()], async (req, res) =>
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-    const track = await Track.findByIdAndUpdate(
-      req.params.id,
-      { status: 'approved', moderationComment: req.body.comment || '', approvedAt: new Date() },
-      { new: true }
-    ).populate('author', 'username').lean();
-    if (!track) return res.status(404).json({ message: 'Трек не найден' });
+    const tr = await Track.findById(req.params.id);
+    if (!tr) return res.status(404).json({ message: 'Трек не найден' });
+    tr.status = 'approved';
+    tr.moderationComment = req.body.comment || '';
+    tr.approvedAt = new Date();
+    if (tr.coverChangeStatus === 'pending' && tr.coverImagePending) {
+      tr.coverImage = tr.coverImagePending;
+      tr.coverImagePending = '';
+      tr.coverChangeStatus = 'none';
+      tr.coverModerationComment = '';
+    }
+    await tr.save();
+    const track = await Track.findById(tr._id).populate('author', 'username').lean();
     res.json(track);
   } catch (err) {
     res.status(500).json({ message: err.message });
