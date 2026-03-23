@@ -25,15 +25,14 @@ const AUTO_DEFINITIONS = [
   }
 ];
 
-const MANUAL_DEFINITIONS = [
-  {
-    title: 'По жанрам/настроениям',
-    description: 'Synthwave, Phonk, Chill, Dark и другие тематические подборки.'
-  },
-  {
-    title: 'Для сценариев',
-    description: 'Для работы, для дороги, ночной вайб и другие сценарии прослушивания.'
-  }
+const MANUAL_DEFINITIONS = [];
+
+const GENRE_PLAYLISTS = [
+  { title: 'Рок / Металл', description: 'Энергичный гитарный звук: рок и металл.', genre: 'rock-metal' },
+  { title: 'Поп', description: 'Поп-мелодии и хиты.', genre: 'pop' },
+  { title: 'Джаз', description: 'Джазовые гармонии и импровизация.', genre: 'jazz' },
+  { title: 'Хип-хоп / Рэп', description: 'Биты, речитатив и уличная энергия.', genre: 'hiphop-rap' },
+  { title: 'Электроника', description: 'EDM, synth и электронные вайбы.', genre: 'electronic' }
 ];
 
 function daysAgo(days) {
@@ -141,6 +140,48 @@ async function getMonthlyReleaseTracks(limit = 40) {
     .map((x) => x.id);
 }
 
+function fallbackGenreKeywords(genreCode, text = '') {
+  const t = String(text || '').toLowerCase();
+  if (genreCode === 'rock-metal') return /\b(rock|metal|alt rock|hard rock|grunge|гитар|рок|метал)\b/i.test(t);
+  if (genreCode === 'pop') return /\b(pop|dance pop|поп)\b/i.test(t);
+  if (genreCode === 'jazz') return /\b(jazz|swing|smooth jazz|джаз)\b/i.test(t);
+  if (genreCode === 'hiphop-rap') return /\b(hip[- ]?hop|rap|trap|drill|рэп|хип[- ]?хоп)\b/i.test(t);
+  if (genreCode === 'electronic') return /\b(edm|electro|electronic|house|techno|trance|synth|dnb|electro|электро)\b/i.test(t);
+  return false;
+}
+
+async function getGenreTracks(genreCode, limit = 60) {
+  const exact = await Track.find({ status: 'approved', genre: genreCode })
+    .select('_id plays likes createdAt title description')
+    .sort({ plays: -1, createdAt: -1 })
+    .limit(limit)
+    .lean();
+  if (exact.length >= Math.floor(limit * 0.7)) {
+    return exact.map((t) => String(t._id));
+  }
+  // Полуавтомат: если старые треки без genre, добираем по ключевым словам.
+  const loose = await Track.find({ status: 'approved' })
+    .select('_id plays likes createdAt title description genre')
+    .sort({ plays: -1, createdAt: -1 })
+    .limit(300)
+    .lean();
+  const fromKeywords = loose.filter((t) => {
+    if (String(t.genre || '') === genreCode) return true;
+    const text = `${t.title || ''} ${t.description || ''}`;
+    return fallbackGenreKeywords(genreCode, text);
+  });
+  const uniq = [];
+  const seen = new Set();
+  for (const t of [...exact, ...fromKeywords]) {
+    const id = String(t._id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    uniq.push(id);
+    if (uniq.length >= limit) break;
+  }
+  return uniq;
+}
+
 async function ensureManualPlaylist({ title, description, createdBy }) {
   const existing = await Playlist.findOne({ title, isPublic: true, createdBy }).select('_id').lean();
   if (existing) return { title, action: 'exists' };
@@ -172,7 +213,12 @@ async function upsertAutoPlaylist({ title, description, createdBy, trackIds }) {
   return { title, action: 'updated', tracks: trackIds.length };
 }
 
-async function syncHybridPlaylists({ adminUserId, onlyAutoTypes = null, includeManual = true }) {
+async function syncHybridPlaylists({
+  adminUserId,
+  onlyAutoTypes = null,
+  includeManual = true,
+  includeGenreAuto = true
+}) {
   const [weekly, hot, community, monthly] = await Promise.all([
     getWeeklyTrendingTracks(),
     getNewAndHotTracks(),
@@ -216,8 +262,33 @@ async function syncHybridPlaylists({ adminUserId, onlyAutoTypes = null, includeM
     }
   }
 
+  const genreResults = [];
+  if (includeGenreAuto) {
+    for (const g of GENRE_PLAYLISTS) {
+      // eslint-disable-next-line no-await-in-loop
+      const trackIds = await getGenreTracks(g.genre);
+      // eslint-disable-next-line no-await-in-loop
+      const r = await upsertAutoPlaylist({
+        title: g.title,
+        description: g.description,
+        createdBy: adminUserId,
+        trackIds
+      });
+      genreResults.push(r);
+    }
+  }
+
+  // Удаляем устаревший плейлист сценариев (если был создан гибридом раньше).
+  if (includeGenreAuto) {
+    await Playlist.deleteMany({
+      title: { $in: ['Для сценариев', 'По жанрам/настроениям'] },
+      createdBy: adminUserId
+    });
+  }
+
   return {
     auto: autoResults,
+    genre: genreResults,
     manual: manualResults
   };
 }
