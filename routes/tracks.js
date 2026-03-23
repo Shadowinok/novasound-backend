@@ -2,7 +2,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
-const Track = require('../models/Track');
+const TrackModel = require('../models/Track');
+const Track = TrackModel;
+const { GENRES } = TrackModel;
 const ListenLog = require('../models/ListenLog');
 const { protect, optionalAuth, protectStream } = require('../middleware/auth');
 const { body, param, validationResult } = require('express-validator');
@@ -281,7 +283,8 @@ router.post('/:id/cover', ...coverReplaceStack, handleCoverReplace);
 // POST /api/tracks — загрузка (авторизованный пользователь)
 router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTrackFiles, [
   body('title').trim().isLength({ min: 3, max: 100 }).withMessage('Название 3-100 символов'),
-  body('description').optional().trim().isLength({ max: 2000 })
+  body('description').optional().trim().isLength({ max: 2000 }),
+  body('genre').isIn(GENRES).withMessage('Выберите жанр из списка')
 ], async (req, res) => {
   let stage = 'start';
   try {
@@ -291,7 +294,7 @@ router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTr
     if (!req.files?.audio?.[0]) return res.status(400).json({ message: 'Нужен аудиофайл' });
 
     stage = 'content-check';
-    const { title, description } = req.body;
+    const { title, description, genre } = req.body;
     if (containsProfanity(title) || containsProfanity(description || '')) {
       return res.status(400).json({ message: 'Недопустимое содержимое в названии или описании' });
     }
@@ -400,6 +403,7 @@ router.post('/', protect, trackUploadIpLimiter, trackUploadUserLimiter, uploadTr
     const track = await Track.create({
       title,
       description: description || '',
+      genre,
       author: req.user._id,
       audioFileId,
       coverImage,
@@ -529,7 +533,8 @@ router.get('/:id', optionalAuth, async (req, res) => {
 router.put('/:id', protect, [
   param('id').isMongoId(),
   body('title').optional().trim().isLength({ min: 3, max: 100 }),
-  body('description').optional().trim().isLength({ max: 2000 })
+  body('description').optional().trim().isLength({ max: 2000 }),
+  body('genre').optional().isIn(GENRES).withMessage('Выберите жанр из списка')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -540,7 +545,7 @@ router.put('/:id', protect, [
       return res.status(403).json({ message: 'Можно редактировать только свои треки' });
     }
     if (track.status !== 'pending') return res.status(400).json({ message: 'Редактировать можно только треки на модерации' });
-    const { title, description } = req.body;
+    const { title, description, genre } = req.body;
     if (title !== undefined) {
       if (containsProfanity(title)) return res.status(400).json({ message: 'Недопустимое название' });
       track.title = title;
@@ -549,6 +554,7 @@ router.put('/:id', protect, [
       if (containsProfanity(description)) return res.status(400).json({ message: 'Недопустимое описание' });
       track.description = description;
     }
+    if (genre !== undefined) track.genre = genre;
     const textModerated = `${track.title} ${track.description || ''}`;
     const suspicious = containsSuspiciousContent(textModerated);
     const coverAwaiting =

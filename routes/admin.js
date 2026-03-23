@@ -125,7 +125,8 @@ router.post('/playlists/hybrid/sync-monthly', async (req, res) => {
     const result = await syncHybridPlaylists({
       adminUserId: req.user._id,
       onlyAutoTypes: ['monthlyReleases'],
-      includeManual: false
+      includeManual: false,
+      includeGenreAuto: false
     });
     res.json({
       message: 'Плейлист «Релизы месяца» синхронизирован',
