@@ -48,6 +48,10 @@ const GENRE_PLAYLISTS = [
   { systemKey: 'auto_genre_electronic', title: 'Электроника', description: 'EDM, synth и электронные вайбы.', genre: 'electronic' }
 ];
 
+const SYSTEM_DEFINITIONS = [...AUTO_DEFINITIONS, ...GENRE_PLAYLISTS];
+const CANONICAL_SYSTEM_KEY_BY_TITLE = new Map(SYSTEM_DEFINITIONS.map((d) => [d.title, d.systemKey]));
+const CANONICAL_SYSTEM_KEYS = new Set(SYSTEM_DEFINITIONS.map((d) => d.systemKey));
+
 function daysAgo(days) {
   const d = new Date();
   d.setDate(d.getDate() - days);
@@ -267,6 +271,51 @@ async function upsertAutoPlaylist({ systemKey, title, description, createdBy, tr
 }
 
 async function ensureAdminPublicSystemKeys(adminUserId) {
+  // Миграция: у старых системных плейлистов мог быть случайный systemKey -> привязываем к каноничному по title.
+  for (const [title, systemKey] of CANONICAL_SYSTEM_KEY_BY_TITLE.entries()) {
+    // eslint-disable-next-line no-await-in-loop
+    const sameTitle = await Playlist.find({
+      createdBy: adminUserId,
+      isPublic: true,
+      title
+    })
+      .sort({ updatedAt: -1, createdAt: -1, _id: -1 })
+      .select('_id systemKey')
+      .lean();
+
+    if (!sameTitle.length) continue;
+
+    const keeper = sameTitle.find((p) => String(p.systemKey || '') === systemKey) || sameTitle[0];
+    // eslint-disable-next-line no-await-in-loop
+    await Playlist.updateOne({ _id: keeper._id }, { $set: { systemKey } });
+
+    const duplicateIds = sameTitle
+      .filter((p) => String(p._id) !== String(keeper._id))
+      .map((p) => p._id);
+
+    if (duplicateIds.length) {
+      // eslint-disable-next-line no-await-in-loop
+      await Playlist.deleteMany({ _id: { $in: duplicateIds } });
+    }
+  }
+
+  // На случай, если дубли уже есть по одному и тому же systemKey.
+  for (const systemKey of CANONICAL_SYSTEM_KEYS) {
+    // eslint-disable-next-line no-await-in-loop
+    const sameKey = await Playlist.find({
+      createdBy: adminUserId,
+      isPublic: true,
+      systemKey
+    })
+      .sort({ updatedAt: -1, createdAt: -1, _id: -1 })
+      .select('_id')
+      .lean();
+    if (sameKey.length <= 1) continue;
+    const duplicateIds = sameKey.slice(1).map((p) => p._id);
+    // eslint-disable-next-line no-await-in-loop
+    await Playlist.deleteMany({ _id: { $in: duplicateIds } });
+  }
+
   const rows = await Playlist.find({
     createdBy: adminUserId,
     isPublic: true,
