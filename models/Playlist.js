@@ -41,6 +41,14 @@ const playlistSchema = new mongoose.Schema({
     default: 100,
     min: 0,
     max: 9999
+  },
+  /** Служебный стабильный ключ для авто-синхронизации (не зависит от title) */
+  systemKey: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 120,
+    index: true
   }
 }, { timestamps: true });
 
