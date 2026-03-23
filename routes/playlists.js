@@ -58,6 +58,26 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/playlists/featured — публичные плейлисты для главной (выбраны админом)
+router.get('/featured', async (req, res) => {
+  try {
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 12)) : 6;
+    const playlists = await Playlist.find({
+      ...publicPlaylistFilter(),
+      featuredOnHome: true
+    })
+      .populate('createdBy', 'username')
+      .populate({ path: 'tracks', match: { status: 'approved' }, select: 'title coverImage author duration plays', populate: { path: 'author', select: 'username' } })
+      .sort({ featuredOrder: 1, updatedAt: -1, createdAt: -1 })
+      .limit(limit)
+      .lean();
+    res.json(playlists);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // GET /api/playlists/my/list — до /:id, чтобы не перехватывалось как id
 router.get('/my/list', protect, async (req, res) => {
   try {
@@ -249,7 +269,9 @@ router.delete('/:id/tracks/:trackId', protect, [param('id').isMongoId(), param('
 router.post('/', protect, adminOnly, upload.single('cover'), [
   body('title').trim().isLength({ min: 1, max: 100 }).withMessage('Название 1-100 символов'),
   body('description').optional().trim().isLength({ max: 1000 }),
-  body('tracks').optional()
+  body('tracks').optional(),
+  body('featuredOnHome').optional().isBoolean(),
+  body('featuredOrder').optional().isInt({ min: 0, max: 9999 })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -275,7 +297,9 @@ router.post('/', protect, adminOnly, upload.single('cover'), [
       coverImage,
       tracks: tracks.filter(Boolean),
       createdBy: req.user._id,
-      isPublic: true
+      isPublic: true,
+      featuredOnHome: String(req.body.featuredOnHome || '').toLowerCase() === 'true',
+      featuredOrder: Number.isFinite(Number(req.body.featuredOrder)) ? Number(req.body.featuredOrder) : 100
     });
     const populated = await Playlist.findById(playlist._id).populate('createdBy', 'username').populate('tracks', 'title coverImage author duration').lean();
     res.status(201).json(populated);
@@ -296,6 +320,13 @@ async function handleAdminPlaylistUpdate(req, res) {
     }
     if (req.body.title !== undefined) playlist.title = req.body.title;
     if (req.body.description !== undefined) playlist.description = req.body.description;
+    if (req.body.featuredOnHome !== undefined) {
+      playlist.featuredOnHome = String(req.body.featuredOnHome).toLowerCase() === 'true' || req.body.featuredOnHome === true;
+    }
+    if (req.body.featuredOrder !== undefined && req.body.featuredOrder !== '') {
+      const nextOrder = Number(req.body.featuredOrder);
+      if (Number.isFinite(nextOrder)) playlist.featuredOrder = nextOrder;
+    }
     let tracksUpdate = req.body.tracks;
     if (typeof tracksUpdate === 'string') try { tracksUpdate = JSON.parse(tracksUpdate); } catch (_) {}
     if (Array.isArray(tracksUpdate)) playlist.tracks = tracksUpdate.filter(Boolean);
@@ -324,6 +355,8 @@ const adminPlaylistUpdateStack = [
   body('title').optional().trim().isLength({ min: 1, max: 100 }),
   body('description').optional().trim().isLength({ max: 1000 }),
   body('tracks').optional(),
+  body('featuredOnHome').optional().isBoolean(),
+  body('featuredOrder').optional().isInt({ min: 0, max: 9999 }),
   handleAdminPlaylistUpdate
 ];
 
