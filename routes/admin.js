@@ -79,10 +79,10 @@ router.get('/users', async (req, res) => {
   }
 });
 
-// GET /api/admin/playlists — все плейлисты (вкладка админки; личные + публичные)
+// GET /api/admin/playlists — только публичные подборки (личные пользователей не показываем)
 router.get('/playlists', async (req, res) => {
   try {
-    const playlists = await Playlist.find({})
+    const playlists = await Playlist.find({ isPublic: { $ne: false } })
       .populate('createdBy', 'username')
       .populate({ path: 'tracks', match: { status: 'approved' }, select: 'title coverImage author duration', populate: { path: 'author', select: 'username' } })
       .sort({ createdAt: -1 })
