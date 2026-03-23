@@ -284,13 +284,8 @@ router.post('/', protect, adminOnly, upload.single('cover'), [
   }
 });
 
-// PUT /api/playlists/:id — только админ
-router.put('/:id', protect, adminOnly, upload.single('cover'), [
-  param('id').isMongoId(),
-  body('title').optional().trim().isLength({ min: 1, max: 100 }),
-  body('description').optional().trim().isLength({ max: 1000 }),
-  body('tracks').optional()
-], async (req, res) => {
+// PUT/POST /api/playlists/:id — только админ (POST дублирует PUT для надёжного multipart через прокси/CDN)
+async function handleAdminPlaylistUpdate(req, res) {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -319,7 +314,21 @@ router.put('/:id', protect, adminOnly, upload.single('cover'), [
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-});
+}
+
+const adminPlaylistUpdateStack = [
+  protect,
+  adminOnly,
+  upload.single('cover'),
+  param('id').isMongoId(),
+  body('title').optional().trim().isLength({ min: 1, max: 100 }),
+  body('description').optional().trim().isLength({ max: 1000 }),
+  body('tracks').optional(),
+  handleAdminPlaylistUpdate
+];
+
+router.put('/:id', ...adminPlaylistUpdateStack);
+router.post('/:id', ...adminPlaylistUpdateStack);
 
 // DELETE /api/playlists/:id — только админ
 router.delete('/:id', protect, adminOnly, async (req, res) => {
