@@ -69,7 +69,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
-// POST /api/playlists/my — создать свой плейлист (по умолчанию приватный; в каталог — только если isPublic: true)
+// POST /api/playlists/my — только личный плейлист (каталог/главная — только через POST /playlists в админке).
 router.post('/my', protect, [
   body('title').trim().isLength({ min: 1, max: 100 }).withMessage('Название 1-100 символов'),
   body('description').optional().trim().isLength({ max: 1000 })
@@ -77,14 +77,13 @@ router.post('/my', protect, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-    const isPublic = req.body.isPublic === true || req.body.isPublic === 'true';
     const playlist = await Playlist.create({
       title: req.body.title,
       description: req.body.description || '',
       coverImage: '',
       tracks: [],
       createdBy: req.user._id,
-      isPublic
+      isPublic: false
     });
     const populated = await Playlist.findById(playlist._id).populate('createdBy', 'username').populate('tracks', 'title coverImage author duration').lean();
     res.status(201).json(populated);
@@ -93,7 +92,7 @@ router.post('/my', protect, [
   }
 });
 
-// PUT /api/playlists/my/:id — владелец: название, описание, публичность
+// PUT /api/playlists/my/:id — только личные плейлисты: название и описание. Публичные редактируются в админке (PUT /playlists/:id).
 router.put('/my/:id', protect, [
   param('id').isMongoId(),
   body('title').optional().trim().isLength({ min: 1, max: 100 }),
@@ -107,11 +106,11 @@ router.put('/my/:id', protect, [
     if (playlist.createdBy.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Доступ запрещён' });
     }
+    if (playlist.isPublic !== false) {
+      return res.status(403).json({ message: 'Публичный плейлист редактируйте в админ-панели' });
+    }
     if (req.body.title !== undefined) playlist.title = req.body.title;
     if (req.body.description !== undefined) playlist.description = req.body.description;
-    if (req.body.isPublic !== undefined) {
-      playlist.isPublic = req.body.isPublic === true || req.body.isPublic === 'true';
-    }
     await playlist.save();
     const populated = await Playlist.findById(playlist._id)
       .populate('createdBy', 'username')
@@ -132,6 +131,9 @@ router.delete('/my/:id', protect, [param('id').isMongoId()], async (req, res) =>
     if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
     if (playlist.createdBy.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Доступ запрещён' });
+    }
+    if (playlist.isPublic === true) {
+      return res.status(403).json({ message: 'Публичный плейлист удаляйте в админ-панели' });
     }
     await Playlist.findByIdAndDelete(req.params.id);
     res.json({ message: 'Плейлист удалён' });
