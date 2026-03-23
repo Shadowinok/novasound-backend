@@ -199,8 +199,8 @@ async function handleCoverReplace(req, res) {
     if (track.author.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Можно менять обложку только у своих треков' });
     }
-    if (track.status !== 'approved') {
-      return res.status(400).json({ message: 'Обложку так можно менять только у одобренных треков' });
+    if (track.status !== 'approved' && track.status !== 'pending') {
+      return res.status(400).json({ message: 'Обложку можно менять у треков на модерации или уже одобренных' });
     }
     // upload_stream на части хостингов (Render) иногда падает; upload + data URI стабильнее для файлов до 5 МБ
     const mime = req.file.mimetype || 'image/jpeg';

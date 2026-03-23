@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const { body, param, validationResult } = require('express-validator');
 const Playlist = require('../models/Playlist');
 const Track = require('../models/Track');
@@ -8,6 +9,27 @@ const cloudinary = require('../config/cloudinary');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+const uploadPlaylistCover = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname !== 'cover') return cb(new Error('Ожидается поле cover'));
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) return cb(null, true);
+    if (/^image\/(jpeg|png|webp)/.test(file.mimetype || '')) return cb(null, true);
+    cb(new Error('Нужен файл изображения: jpg, png или webp'));
+  }
+});
+function uploadPlaylistCoverMiddleware(req, res, next) {
+  uploadPlaylistCover.single('cover')(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'Обложка слишком большая (макс. 5 МБ)' });
+    }
+    return res.status(400).json({ message: err.message || 'Ошибка загрузки обложки' });
+  });
+}
 
 const publicPlaylistFilter = () => ({
   $or: [{ isPublic: true }, { isPublic: { $exists: false } }]
@@ -41,7 +63,12 @@ router.get('/my/list', protect, async (req, res) => {
   try {
     const playlists = await Playlist.find({ createdBy: req.user._id })
       .populate('createdBy', 'username')
-      .populate({ path: 'tracks', match: { status: 'approved' }, populate: { path: 'author', select: 'username' } })
+      .populate({
+        path: 'tracks',
+        match: { status: 'approved' },
+        select: 'title coverImage author duration status',
+        populate: { path: 'author', select: 'username' }
+      })
       .sort({ createdAt: -1 })
       .lean();
     res.json(playlists);
@@ -89,6 +116,44 @@ router.post('/my', protect, [
     res.status(500).json({ message: err.message });
   }
 });
+
+// PUT/POST /api/playlists/my/:id/cover — обложка своего плейлиста (владелец)
+async function handleMyPlaylistCover(req, res) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!req.file) return res.status(400).json({ message: 'Выберите файл обложки' });
+    const playlist = await Playlist.findById(req.params.id);
+    if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (playlist.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Можно менять обложку только у своих плейлистов' });
+    }
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader.upload_stream(
+        { folder: 'novasound/playlists', resource_type: 'image' },
+        (err, r) => (err ? reject(err) : resolve(r))
+      ).end(req.file.buffer);
+    });
+    if (!result?.secure_url) return res.status(502).json({ message: 'Не удалось загрузить обложку' });
+    playlist.coverImage = result.secure_url;
+    await playlist.save();
+    const populated = await Playlist.findById(playlist._id)
+      .populate('createdBy', 'username')
+      .populate({
+        path: 'tracks',
+        match: { status: 'approved' },
+        select: 'title coverImage author duration status',
+        populate: { path: 'author', select: 'username' }
+      })
+      .lean();
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+}
+const myPlaylistCoverStack = [protect, param('id').isMongoId(), uploadPlaylistCoverMiddleware, handleMyPlaylistCover];
+router.put('/my/:id/cover', ...myPlaylistCoverStack);
+router.post('/my/:id/cover', ...myPlaylistCoverStack);
 
 // PUT /api/playlists/my/:id — только личные плейлисты: название и описание. Публичные редактируются в админке (PUT /playlists/:id).
 router.put('/my/:id', protect, [
