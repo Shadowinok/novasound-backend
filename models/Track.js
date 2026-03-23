@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 
+const GENRES = ['rock-metal', 'pop', 'jazz', 'hiphop-rap', 'electronic', 'other'];
+
 const trackSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -11,6 +13,13 @@ const trackSchema = new mongoose.Schema({
     type: String,
     default: '',
     maxlength: 2000
+  },
+  genre: {
+    type: String,
+    enum: GENRES,
+    required: true,
+    default: 'other',
+    index: true
   },
   author: {
     type: mongoose.Schema.Types.ObjectId,
@@ -74,5 +83,7 @@ const trackSchema = new mongoose.Schema({
 trackSchema.index({ status: 1, createdAt: -1 });
 trackSchema.index({ author: 1, createdAt: -1 });
 trackSchema.index({ plays: -1 });
+trackSchema.index({ genre: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Track', trackSchema);
+module.exports.GENRES = GENRES;
