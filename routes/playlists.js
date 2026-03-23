@@ -22,12 +22,10 @@ function canViewPrivatePlaylist(playlist, user) {
   return uid === owner;
 }
 
-// GET /api/playlists — в каталоге только публичные; админ видит все
-router.get('/', optionalAuth, async (req, res) => {
+// GET /api/playlists — только публичный каталог (одинаково для всех, включая админа). Полный список — GET /api/admin/playlists
+router.get('/', async (req, res) => {
   try {
-    const isAdmin = req.user?.role === 'admin';
-    const query = isAdmin ? {} : publicPlaylistFilter();
-    const playlists = await Playlist.find(query)
+    const playlists = await Playlist.find(publicPlaylistFilter())
       .populate('createdBy', 'username')
       .populate({ path: 'tracks', match: { status: 'approved' }, select: 'title coverImage author duration plays', populate: { path: 'author', select: 'username' } })
       .sort({ createdAt: -1 })

@@ -79,6 +79,20 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// GET /api/admin/playlists — все плейлисты (вкладка админки; личные + публичные)
+router.get('/playlists', async (req, res) => {
+  try {
+    const playlists = await Playlist.find({})
+      .populate('createdBy', 'username')
+      .populate({ path: 'tracks', match: { status: 'approved' }, select: 'title coverImage author duration', populate: { path: 'author', select: 'username' } })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(playlists);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // DELETE /api/admin/users/:id — удалить аккаунт пользователя (жёстко, без подтверждения)
 router.delete('/users/:id', [
   param('id').isMongoId(),
