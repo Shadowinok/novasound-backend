@@ -119,6 +119,23 @@ router.post('/playlists/hybrid/sync', async (req, res) => {
   }
 });
 
+// POST /api/admin/playlists/hybrid/sync-monthly — обновить только плейлист «Релизы месяца»
+router.post('/playlists/hybrid/sync-monthly', async (req, res) => {
+  try {
+    const result = await syncHybridPlaylists({
+      adminUserId: req.user._id,
+      onlyAutoTypes: ['monthlyReleases'],
+      includeManual: false
+    });
+    res.json({
+      message: 'Плейлист «Релизы месяца» синхронизирован',
+      ...result
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка синхронизации «Релизы месяца»' });
+  }
+});
+
 // DELETE /api/admin/users/:id — удалить аккаунт пользователя (жёстко, без подтверждения)
 router.delete('/users/:id', [
   param('id').isMongoId(),
