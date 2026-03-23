@@ -296,6 +296,9 @@ router.put('/:id', protect, adminOnly, upload.single('cover'), [
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     const playlist = await Playlist.findById(req.params.id);
     if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (playlist.isPublic === false) {
+      return res.status(403).json({ message: 'Личный плейлист нельзя редактировать через админский endpoint' });
+    }
     if (req.body.title !== undefined) playlist.title = req.body.title;
     if (req.body.description !== undefined) playlist.description = req.body.description;
     let tracksUpdate = req.body.tracks;
@@ -321,8 +324,12 @@ router.put('/:id', protect, adminOnly, upload.single('cover'), [
 // DELETE /api/playlists/:id — только админ
 router.delete('/:id', protect, adminOnly, async (req, res) => {
   try {
-    const playlist = await Playlist.findByIdAndDelete(req.params.id);
+    const playlist = await Playlist.findById(req.params.id);
     if (!playlist) return res.status(404).json({ message: 'Плейлист не найден' });
+    if (playlist.isPublic === false) {
+      return res.status(403).json({ message: 'Личный плейлист нельзя удалять через админский endpoint' });
+    }
+    await Playlist.deleteOne({ _id: playlist._id });
     res.json({ message: 'Плейлист удалён' });
   } catch (err) {
     res.status(500).json({ message: err.message });

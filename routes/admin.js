@@ -82,7 +82,19 @@ router.get('/users', async (req, res) => {
 // GET /api/admin/playlists — только публичные подборки (личные пользователей не показываем)
 router.get('/playlists', async (req, res) => {
   try {
-    const playlists = await Playlist.find({ isPublic: { $ne: false } })
+    const scopeRaw = String(req.query.scope || 'editorial').trim().toLowerCase();
+    const scope = ['editorial', 'public', 'all'].includes(scopeRaw) ? scopeRaw : 'editorial';
+
+    let filter = { isPublic: { $ne: false } };
+    if (scope === 'editorial') {
+      const adminUsers = await User.find({ role: 'admin' }).select('_id').lean();
+      const adminIds = adminUsers.map((u) => u._id);
+      filter = { isPublic: { $ne: false }, createdBy: { $in: adminIds } };
+    } else if (scope === 'all') {
+      filter = {};
+    }
+
+    const playlists = await Playlist.find(filter)
       .populate('createdBy', 'username')
       .populate({ path: 'tracks', match: { status: 'approved' }, select: 'title coverImage author duration', populate: { path: 'author', select: 'username' } })
       .sort({ createdAt: -1 })
