@@ -1,24 +1,31 @@
 const Playlist = require('../models/Playlist');
 const Track = require('../models/Track');
 const ListenLog = require('../models/ListenLog');
+const mongoose = require('mongoose');
+
+const makeSystemKey = () => `pl_${new mongoose.Types.ObjectId().toString()}`;
 
 const AUTO_DEFINITIONS = [
   {
+    systemKey: 'auto_weekly_trending',
     title: 'Тренды недели',
     description: 'Самое слушаемое за последние 7 дней.',
     type: 'weeklyTrending'
   },
   {
+    systemKey: 'auto_new_and_hot',
     title: 'Новые и горячие',
     description: 'Свежие треки с самым быстрым ростом прослушиваний.',
     type: 'newAndHot'
   },
   {
+    systemKey: 'auto_community_finds',
     title: 'Открытия комьюнити',
     description: 'Недооцененные треки с сильной поддержкой слушателей.',
     type: 'communityFinds'
   },
   {
+    systemKey: 'auto_monthly_releases',
     title: 'Релизы месяца',
     description: 'Лучшие релизы за текущий месяц.',
     type: 'monthlyReleases'
@@ -28,11 +35,11 @@ const AUTO_DEFINITIONS = [
 const MANUAL_DEFINITIONS = [];
 
 const GENRE_PLAYLISTS = [
-  { title: 'Рок / Металл', description: 'Энергичный гитарный звук: рок и металл.', genre: 'rock-metal' },
-  { title: 'Поп', description: 'Поп-мелодии и хиты.', genre: 'pop' },
-  { title: 'Джаз', description: 'Джазовые гармонии и импровизация.', genre: 'jazz' },
-  { title: 'Хип-хоп / Рэп', description: 'Биты, речитатив и уличная энергия.', genre: 'hiphop-rap' },
-  { title: 'Электроника', description: 'EDM, synth и электронные вайбы.', genre: 'electronic' }
+  { systemKey: 'auto_genre_rock_metal', title: 'Рок / Металл', description: 'Энергичный гитарный звук: рок и металл.', genre: 'rock-metal' },
+  { systemKey: 'auto_genre_pop', title: 'Поп', description: 'Поп-мелодии и хиты.', genre: 'pop' },
+  { systemKey: 'auto_genre_jazz', title: 'Джаз', description: 'Джазовые гармонии и импровизация.', genre: 'jazz' },
+  { systemKey: 'auto_genre_hiphop_rap', title: 'Хип-хоп / Рэп', description: 'Биты, речитатив и уличная энергия.', genre: 'hiphop-rap' },
+  { systemKey: 'auto_genre_electronic', title: 'Электроника', description: 'EDM, synth и электронные вайбы.', genre: 'electronic' }
 ];
 
 function daysAgo(days) {
@@ -195,22 +202,36 @@ async function ensureManualPlaylist({ title, description, createdBy }) {
   return { title, action: 'created' };
 }
 
-async function upsertAutoPlaylist({ title, description, createdBy, trackIds }) {
-  const playlist = await Playlist.findOne({ title, isPublic: true, createdBy });
+async function upsertAutoPlaylist({ systemKey, title, description, createdBy, trackIds }) {
+  const playlist = await Playlist.findOne({ systemKey, isPublic: true, createdBy });
   if (!playlist) {
     await Playlist.create({
+      systemKey,
       title,
       description,
       isPublic: true,
       tracks: trackIds,
       createdBy
     });
-    return { title, action: 'created', tracks: trackIds.length };
+    return { title, systemKey, action: 'created', tracks: trackIds.length };
   }
+  if (!String(playlist.systemKey || '').trim()) playlist.systemKey = systemKey || makeSystemKey();
   playlist.description = description;
   playlist.tracks = trackIds;
   await playlist.save();
-  return { title, action: 'updated', tracks: trackIds.length };
+  return { title, systemKey, action: 'updated', tracks: trackIds.length };
+}
+
+async function ensureAdminPublicSystemKeys(adminUserId) {
+  const rows = await Playlist.find({
+    createdBy: adminUserId,
+    isPublic: true,
+    $or: [{ systemKey: { $exists: false } }, { systemKey: '' }]
+  }).select('_id').lean();
+  for (const row of rows) {
+    // eslint-disable-next-line no-await-in-loop
+    await Playlist.updateOne({ _id: row._id }, { $set: { systemKey: makeSystemKey() } });
+  }
 }
 
 async function syncHybridPlaylists({
@@ -225,6 +246,7 @@ async function syncHybridPlaylists({
     getCommunityFindTracks(),
     getMonthlyReleaseTracks()
   ]);
+  await ensureAdminPublicSystemKeys(adminUserId);
 
   const autoByType = {
     weeklyTrending: weekly,
@@ -241,6 +263,7 @@ async function syncHybridPlaylists({
   for (const def of targetAutoDefs) {
     // eslint-disable-next-line no-await-in-loop
     const r = await upsertAutoPlaylist({
+      systemKey: def.systemKey,
       title: def.title,
       description: def.description,
       createdBy: adminUserId,
@@ -269,6 +292,7 @@ async function syncHybridPlaylists({
       const trackIds = await getGenreTracks(g.genre);
       // eslint-disable-next-line no-await-in-loop
       const r = await upsertAutoPlaylist({
+        systemKey: g.systemKey,
         title: g.title,
         description: g.description,
         createdBy: adminUserId,
