@@ -12,6 +12,7 @@ const { sendEmail, verifyEmailTransport, getEmailModeInfo } = require('../utils/
 const multer = require('multer');
 const path = require('path');
 const cloudinary = require('../config/cloudinary');
+const { syncHybridPlaylists } = require('../services/hybridPlaylists');
 
 const router = express.Router();
 router.use(protect, adminOnly);
@@ -102,6 +103,19 @@ router.get('/playlists', async (req, res) => {
     res.json(playlists);
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/admin/playlists/hybrid/sync — обновить/создать гибридные плейлисты
+router.post('/playlists/hybrid/sync', async (req, res) => {
+  try {
+    const result = await syncHybridPlaylists({ adminUserId: req.user._id });
+    res.json({
+      message: 'Гибридные плейлисты синхронизированы',
+      ...result
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка синхронизации гибридных плейлистов' });
   }
 });
 
