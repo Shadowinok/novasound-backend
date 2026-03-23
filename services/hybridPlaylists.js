@@ -29,6 +29,12 @@ const AUTO_DEFINITIONS = [
     title: 'Релизы месяца',
     description: 'Лучшие релизы за текущий месяц.',
     type: 'monthlyReleases'
+  },
+  {
+    systemKey: 'auto_evergreen_hits',
+    title: 'Вечный хит',
+    description: 'Треки с устойчивой популярностью и долгим интересом слушателей.',
+    type: 'evergreenHits'
   }
 ];
 
@@ -147,6 +153,44 @@ async function getMonthlyReleaseTracks(limit = 40) {
     .map((x) => x.id);
 }
 
+async function getEvergreenHitTracks(limit = 40) {
+  const now = new Date();
+  const d7 = daysAgo(7);
+  const d30 = daysAgo(30);
+  const d90 = daysAgo(90);
+
+  const [lastWeekMap, monthTailMap] = await Promise.all([
+    playMapByPeriod(d7, now),
+    playMapByPeriod(d30, d7)
+  ]);
+
+  const tracks = await Track.find({
+    status: 'approved',
+    createdAt: { $lte: d30, $gte: d90 }
+  })
+    .select('_id plays likes dislikes createdAt')
+    .lean();
+
+  return tracks
+    .map((t) => {
+      const id = String(t._id);
+      const weekPlays = lastWeekMap.get(id) || 0;
+      const monthTailPlays = monthTailMap.get(id) || 0;
+      const likes = Array.isArray(t.likes) ? t.likes.length : 0;
+      const dislikes = Array.isArray(t.dislikes) ? t.dislikes.length : 0;
+      const totalPlays = Number(t.plays) || 0;
+      const engagement = likes / Math.max(totalPlays, 1);
+      // "Вечный хит": не разовый всплеск, а стабильный интерес + норм вовлеченность.
+      const stability = Math.min(weekPlays, monthTailPlays);
+      const score = stability * 3 + weekPlays + monthTailPlays + engagement * 120 - dislikes * 2;
+      return { id, score, weekPlays, monthTailPlays };
+    })
+    .filter((x) => x.weekPlays >= 4 && x.monthTailPlays >= 8)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((x) => x.id);
+}
+
 function fallbackGenreKeywords(genreCode, text = '') {
   const t = String(text || '').toLowerCase();
   if (genreCode === 'rock-metal') return /\b(rock|metal|alt rock|hard rock|grunge|гитар|рок|метал)\b/i.test(t);
@@ -240,11 +284,12 @@ async function syncHybridPlaylists({
   includeManual = true,
   includeGenreAuto = true
 }) {
-  const [weekly, hot, community, monthly] = await Promise.all([
+  const [weekly, hot, community, monthly, evergreen] = await Promise.all([
     getWeeklyTrendingTracks(),
     getNewAndHotTracks(),
     getCommunityFindTracks(),
-    getMonthlyReleaseTracks()
+    getMonthlyReleaseTracks(),
+    getEvergreenHitTracks()
   ]);
   await ensureAdminPublicSystemKeys(adminUserId);
 
@@ -252,7 +297,8 @@ async function syncHybridPlaylists({
     weeklyTrending: weekly,
     newAndHot: hot,
     communityFinds: community,
-    monthlyReleases: monthly
+    monthlyReleases: monthly,
+    evergreenHits: evergreen
   };
 
   const targetAutoDefs = Array.isArray(onlyAutoTypes) && onlyAutoTypes.length
