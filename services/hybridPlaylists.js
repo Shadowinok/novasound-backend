@@ -172,7 +172,7 @@ async function upsertAutoPlaylist({ title, description, createdBy, trackIds }) {
   return { title, action: 'updated', tracks: trackIds.length };
 }
 
-async function syncHybridPlaylists({ adminUserId }) {
+async function syncHybridPlaylists({ adminUserId, onlyAutoTypes = null, includeManual = true }) {
   const [weekly, hot, community, monthly] = await Promise.all([
     getWeeklyTrendingTracks(),
     getNewAndHotTracks(),
@@ -187,8 +187,12 @@ async function syncHybridPlaylists({ adminUserId }) {
     monthlyReleases: monthly
   };
 
+  const targetAutoDefs = Array.isArray(onlyAutoTypes) && onlyAutoTypes.length
+    ? AUTO_DEFINITIONS.filter((d) => onlyAutoTypes.includes(d.type))
+    : AUTO_DEFINITIONS;
+
   const autoResults = [];
-  for (const def of AUTO_DEFINITIONS) {
+  for (const def of targetAutoDefs) {
     // eslint-disable-next-line no-await-in-loop
     const r = await upsertAutoPlaylist({
       title: def.title,
@@ -200,14 +204,16 @@ async function syncHybridPlaylists({ adminUserId }) {
   }
 
   const manualResults = [];
-  for (const def of MANUAL_DEFINITIONS) {
-    // eslint-disable-next-line no-await-in-loop
-    const r = await ensureManualPlaylist({
-      title: def.title,
-      description: def.description,
-      createdBy: adminUserId
-    });
-    manualResults.push(r);
+  if (includeManual) {
+    for (const def of MANUAL_DEFINITIONS) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await ensureManualPlaylist({
+        title: def.title,
+        description: def.description,
+        createdBy: adminUserId
+      });
+      manualResults.push(r);
+    }
   }
 
   return {
