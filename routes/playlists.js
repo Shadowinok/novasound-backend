@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const mongoose = require('mongoose');
 const { body, param, validationResult } = require('express-validator');
 const Playlist = require('../models/Playlist');
 const Track = require('../models/Track');
@@ -9,6 +10,7 @@ const cloudinary = require('../config/cloudinary');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const makeSystemKey = () => `pl_${new mongoose.Types.ObjectId().toString()}`;
 
 const uploadPlaylistCover = multer({
   storage: multer.memoryStorage(),
@@ -299,7 +301,8 @@ router.post('/', protect, adminOnly, upload.single('cover'), [
       createdBy: req.user._id,
       isPublic: true,
       featuredOnHome: String(req.body.featuredOnHome || '').toLowerCase() === 'true',
-      featuredOrder: Number.isFinite(Number(req.body.featuredOrder)) ? Number(req.body.featuredOrder) : 100
+      featuredOrder: Number.isFinite(Number(req.body.featuredOrder)) ? Number(req.body.featuredOrder) : 100,
+      systemKey: makeSystemKey()
     });
     const populated = await Playlist.findById(playlist._id).populate('createdBy', 'username').populate('tracks', 'title coverImage author duration').lean();
     res.status(201).json(populated);
@@ -320,6 +323,9 @@ async function handleAdminPlaylistUpdate(req, res) {
     }
     if (req.body.title !== undefined) playlist.title = req.body.title;
     if (req.body.description !== undefined) playlist.description = req.body.description;
+    if (playlist.isPublic === true && !String(playlist.systemKey || '').trim()) {
+      playlist.systemKey = makeSystemKey();
+    }
     if (req.body.featuredOnHome !== undefined) {
       playlist.featuredOnHome = String(req.body.featuredOnHome).toLowerCase() === 'true' || req.body.featuredOnHome === true;
     }
