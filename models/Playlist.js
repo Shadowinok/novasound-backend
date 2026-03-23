@@ -28,6 +28,19 @@ const playlistSchema = new mongoose.Schema({
   isPublic: {
     type: Boolean,
     default: true
+  },
+  /** Показывать на главной странице */
+  featuredOnHome: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  /** Порядок на главной (меньше = выше) */
+  featuredOrder: {
+    type: Number,
+    default: 100,
+    min: 0,
+    max: 9999
   }
 }, { timestamps: true });
 
