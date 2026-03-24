@@ -189,6 +189,75 @@ router.get('/latest', async (req, res) => {
   }
 });
 
+// GET /api/tracks/radio/now — упрощённый "единый эфир" из approved-треков
+router.get('/radio/now', async (req, res) => {
+  try {
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.max(5, Math.min(rawLimit, 100)) : 30;
+    const tracks = await Track.find({ status: 'approved' })
+      .select('-coverImagePending -coverChangeStatus -coverModerationComment')
+      .populate('author', 'username')
+      .sort({ createdAt: 1, _id: 1 })
+      .limit(limit)
+      .lean();
+
+    if (!tracks.length) {
+      return res.json({
+        now: null,
+        next: [],
+        queue: [],
+        queueIndex: 0,
+        generatedAt: new Date().toISOString()
+      });
+    }
+
+    const withDurations = tracks.map((t) => ({
+      ...t,
+      duration: Number.isFinite(Number(t.duration)) && Number(t.duration) > 0 ? Number(t.duration) : 180
+    }));
+
+    const cycleDuration = withDurations.reduce((sum, t) => sum + t.duration, 0);
+    const nowSec = Math.floor(Date.now() / 1000);
+    let pos = cycleDuration > 0 ? (nowSec % cycleDuration) : 0;
+
+    let currentIndex = 0;
+    for (let i = 0; i < withDurations.length; i += 1) {
+      const d = withDurations[i].duration;
+      if (pos < d) {
+        currentIndex = i;
+        break;
+      }
+      pos -= d;
+    }
+
+    const orderedQueue = [
+      ...withDurations.slice(currentIndex),
+      ...withDurations.slice(0, currentIndex)
+    ];
+
+    const nowTrack = orderedQueue[0];
+    const offsetSec = Math.max(0, Math.min(nowTrack.duration, Math.floor(pos)));
+    const history = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const idx = (withDurations.length + currentIndex - i) % withDurations.length;
+      history.push(withDurations[idx]);
+    }
+
+    res.json({
+      now: nowTrack,
+      next: orderedQueue.slice(1, 6),
+      history,
+      queue: orderedQueue,
+      queueIndex: 0,
+      nowOffsetSec: offsetSec,
+      live: true,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 const coverMimeOk = (mime) =>
   ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'].includes(String(mime || '').toLowerCase());
 
