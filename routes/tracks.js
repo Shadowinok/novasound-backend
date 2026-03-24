@@ -235,11 +235,21 @@ router.get('/radio/now', async (req, res) => {
       ...withDurations.slice(0, currentIndex)
     ];
 
+    const nowTrack = orderedQueue[0];
+    const nowOffsetSec = Math.max(0, Math.min(nowTrack.duration, Math.floor(pos)));
+    const history = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const idx = (withDurations.length + currentIndex - i) % withDurations.length;
+      history.push(withDurations[idx]);
+    }
+
     res.json({
-      now: orderedQueue[0],
+      now: nowTrack,
       next: orderedQueue.slice(1, 6),
+      history,
       queue: orderedQueue,
       queueIndex: 0,
+      nowOffsetSec,
       generatedAt: new Date().toISOString()
     });
   } catch (err) {
