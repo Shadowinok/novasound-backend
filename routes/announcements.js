@@ -20,6 +20,22 @@ const AI_FEEDS = [
     kind: 'ai-music-news',
     url: 'https://news.google.com/rss/search?q=%D0%B8%D0%B8%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%D1%81%D0%B5%D1%82%D1%8C%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20%D1%81%20%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D1%8C%D1%8E%20%D0%B8%D0%B8%20OR%20AI%20music%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B&hl=ru&gl=RU&ceid=RU:ru'
   }
+  ,
+  {
+    source: 'Игры',
+    kind: 'gaming-news',
+    url: 'https://news.google.com/rss/search?q=%D0%B8%D0%B3%D1%80%D1%8B%20OR%20%D0%B2%D0%B8%D0%B4%D0%B5%D0%BE%D0%B8%D0%B3%D1%80%D1%8B%20OR%20%D0%B3%D0%B5%D0%B9%D0%BC%D0%BF%D0%BB%D0%B5%D0%B9%20%D0%BE%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20OR%20%D0%B2%20%D1%80%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B5%20OR%20%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82%20OR%20%D1%82%D1%80%D0%B5%D0%B9%D0%BB%D0%B5%D1%80%20OR%20%D1%80%D0%B5%D0%BB%D0%B8%D0%B7%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%B4%D0%BE%D0%BD%D0%B1%D0%B0%D1%81%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B&hl=ru&gl=RU&ceid=RU:ru'
+  },
+  {
+    source: 'Кино',
+    kind: 'film-news',
+    url: 'https://news.google.com/rss/search?q=%D0%BA%D0%B8%D0%BD%D0%BE%20OR%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20OR%20%D1%81%D0%B5%D1%80%D0%B8%D0%B0%D0%BB%20OR%20%D0%BF%D1%80%D0%B5%D0%BC%D1%8C%D0%B5%D1%80%D0%B0%20OR%20%D1%82%D1%80%D0%B5%D0%B9%D0%BB%D0%B5%D1%80%20OR%20%D1%81%D1%8A%D0%B5%D0%BC%D0%BA%D0%B8%20OR%20%D0%B7%D0%B0%D0%BF%D0%B8%D1%81%D1%8C%20OR%20%D0%BE%D0%B7%D0%B2%D1%83%D1%87%D0%BA%D0%B0%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%B4%D0%BE%D0%BD%D0%B1%D0%B0%D1%81%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B&hl=ru&gl=RU&ceid=RU:ru'
+  },
+  {
+    source: 'Цифровая индустрия',
+    kind: 'industry-news',
+    url: 'https://news.google.com/rss/search?q=%D1%86%D0%B8%D1%84%D1%80%D0%BE%D0%B2%D0%B0%D1%8F%20%D0%B8%D0%BD%D0%B4%D1%83%D1%81%D1%82%D1%80%D0%B8%D1%8F%20OR%20%D0%B2%20%D1%80%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B5%20OR%20%D0%B3%D0%BE%D1%82%D0%BE%D0%B2%D0%B8%D1%82%D1%81%D1%8F%20%D0%BA%20%D0%B2%D1%8B%D1%85%D0%BE%D0%B4%D1%83%20OR%20%D1%80%D0%B5%D0%BB%D0%B8%D0%B7%20OR%20%D0%BE%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20OR%20%D0%B0%D0%BF%D0%B4%D0%B5%D0%B9%D1%82%20OR%20%D1%82%D0%B5%D1%85%D0%BD%D0%BE%D0%BB%D0%BE%D0%B3%D0%B8%D0%B8%20OR%20%D0%B2%D1%8B%D0%BF%D1%83%D1%81%D0%BA%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%B4%D0%BE%D0%BD%D0%B1%D0%B0%D1%81%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B&hl=ru&gl=RU&ceid=RU:ru'
+  }
 ];
 
 const WEATHER_POINTS = [
@@ -118,6 +134,37 @@ function containsCreativeKeywords(title) {
   return good.some((k) => t.includes(k));
 }
 
+function containsGameKeywords(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+  const good = [
+    'игр', 'игра', 'геймплей', 'трейлер', 'релиз', 'обновлен', 'патч', 'студ',
+    'разработ', 'проект', 'выйдет', 'консоль', 'steam', 'vr', 'ar'
+  ];
+  return good.some((k) => t.includes(k));
+}
+
+function containsFilmKeywords(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+  const good = [
+    'кино', 'фильм', 'сериал', 'промьера', 'премьер', 'премьера', 'трейлер',
+    'съёмк', 'съемк', 'снима', 'запис', 'озвучк', 'директор', 'режисс',
+    'анимац'
+  ];
+  return good.some((k) => t.includes(k));
+}
+
+function containsIndustryKeywords(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+  const good = [
+    'цифров', 'индустр', 'в разработк', 'готовит', 'выпуск', 'релиз',
+    'обновлен', 'апдейт', 'технолог', 'платформ', 'прорыв', 'выходит', 'выйдет'
+  ];
+  return good.some((k) => t.includes(k));
+}
+
 function acceptAiTitle(title, kind) {
   const clean = stripGoogleNewsSuffix(title);
   if (!looksRussian(clean)) return false;
@@ -125,12 +172,12 @@ function acceptAiTitle(title, kind) {
   // Разнообразим: 
   // - ai-music-news: только музыка/аудио
   // - ai-creative-news: только творчество (обложки, изображения, видео, озвучка и т.п.)
-  if (kind === 'ai-creative-news') {
-    if (!containsCreativeKeywords(clean)) return false;
-  } else {
-    if (!containsMusicKeywords(clean)) return false;
-  }
-  return true;
+  if (kind === 'ai-music-news') return containsMusicKeywords(clean);
+  if (kind === 'ai-creative-news') return containsCreativeKeywords(clean);
+  if (kind === 'gaming-news') return containsGameKeywords(clean);
+  if (kind === 'film-news') return containsFilmKeywords(clean);
+  if (kind === 'industry-news') return containsIndustryKeywords(clean);
+  return containsMusicKeywords(clean);
 }
 
 function pickFirstLink(entry) {
