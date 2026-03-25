@@ -12,12 +12,13 @@ const AI_FEEDS = [
   {
     source: 'ИИ',
     kind: 'ai-news',
-    url: 'https://news.google.com/rss/search?q=%D0%B8%D1%81%D0%BA%D1%83%D1%81%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9%20%D0%B8%D0%BD%D1%82%D0%B5%D0%BB%D0%BB%D0%B5%D0%BA%D1%82%20OR%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%D1%81%D0%B5%D1%82%D1%8C%20OR%20ChatGPT&hl=ru&gl=RU&ceid=RU:ru'
+    // Минус-слова убирают политику/войну ещё на уровне выдачи.
+    url: 'https://news.google.com/rss/search?q=%D0%B8%D1%81%D0%BA%D1%83%D1%81%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9%20%D0%B8%D0%BD%D1%82%D0%B5%D0%BB%D0%BB%D0%B5%D0%BA%D1%82%20OR%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%D1%81%D0%B5%D1%82%D1%8C%20OR%20ChatGPT%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%B1%D0%BE%D0%B9%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%B1%D0%B5%D1%81%D0%BF%D0%B8%D0%BB%D0%BE%D1%82%D0%BD%D0%B8%D0%BA%20-%D0%B4%D1%80%D0%BE%D0%BD%20-%D1%81%D0%B0%D0%BD%D0%BA%D1%86%D0%B8%D0%B8%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B%20-%D0%B4%D0%B5%D0%BF%D1%83%D1%82%D0%B0%D1%82&hl=ru&gl=RU&ceid=RU:ru'
   },
   {
     source: 'ИИ-музыка',
     kind: 'ai-music-news',
-    url: 'https://news.google.com/rss/search?q=%D0%B8%D0%B8%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%D1%81%D0%B5%D1%82%D1%8C%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20%D1%81%20%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D1%8C%D1%8E%20%D0%B8%D0%B8%20OR%20AI%20music&hl=ru&gl=RU&ceid=RU:ru'
+    url: 'https://news.google.com/rss/search?q=%D0%B8%D0%B8%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%D1%81%D0%B5%D1%82%D1%8C%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20%D1%81%20%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D1%8C%D1%8E%20%D0%B8%D0%B8%20OR%20AI%20music%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B&hl=ru&gl=RU&ceid=RU:ru'
   }
 ];
 
@@ -78,6 +79,32 @@ function stripGoogleNewsSuffix(title) {
   return t;
 }
 
+function isPoliticalOrWarJunk(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return true;
+  const bad = [
+    // война/боевые
+    'войн', 'фронт', 'ракета', 'снаряд', 'удар', 'атака', 'обстрел', 'пво',
+    'армия', 'минобороны', 'генштаб', 'военн', 'мобилизац', 'наёмник', 'батальон',
+    'дрон', 'беспилот', 'fpv',
+    // политика/власть/санкции
+    'правительств', 'президент', 'губернатор', 'депутат', 'партия', 'выбор', 'митинг',
+    'санкц', 'закон', 'суд', 'прокуратур', 'полици', 'фсб', 'мвд',
+    // "в регионе внедряют" (то, что ты описал)
+    'област', 'крае', 'республик', 'администрац', 'мэр', 'дум',
+    // геополитика/конфликты (часто в заголовках)
+    'украин', 'киев', 'донбасс', 'нато', 'израил', 'палестин', 'иран', 'сирия'
+  ];
+  return bad.some((k) => t.includes(k));
+}
+
+function acceptAiTitle(title) {
+  const clean = stripGoogleNewsSuffix(title);
+  if (!looksRussian(clean)) return false;
+  if (isPoliticalOrWarJunk(clean)) return false;
+  return true;
+}
+
 function pickFirstLink(entry) {
   if (!entry) return '';
   const link = entry.link;
@@ -116,7 +143,7 @@ function parseFeedItems(xml, source, kind = 'ai-news') {
         const link = safeText(it?.link);
         const pub = safeText(it?.pubDate) || safeText(it?.published) || safeText(it?.updated);
         if (!title) return null;
-        if (!looksRussian(title)) return null;
+        if (!acceptAiTitle(title)) return null;
         return { kind, source, title, link, publishedAt: pub || null };
       })
       .filter(Boolean);
@@ -133,7 +160,7 @@ function parseFeedItems(xml, source, kind = 'ai-news') {
         const link = pickFirstLink(e);
         const pub = safeText(e?.published) || safeText(e?.updated);
         if (!title) return null;
-        if (!looksRussian(title)) return null;
+        if (!acceptAiTitle(title)) return null;
         return { kind, source, title, link, publishedAt: pub || null };
       })
       .filter(Boolean);
@@ -175,7 +202,7 @@ async function getAiNewsCached(maxItems = 8) {
   const deduped = [];
   for (const it of merged) {
     const title = stripGoogleNewsSuffix(it.title);
-    if (!looksRussian(title)) continue;
+    if (!acceptAiTitle(title)) continue;
     const key = safeText(title).toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
