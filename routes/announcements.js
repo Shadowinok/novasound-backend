@@ -526,5 +526,47 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/announcements/tts?text=...
+// Серверный нейро-TTS (Edge voices), чтобы не использовать механическую browser speech.
+router.get('/tts', async (req, res) => {
+  try {
+    const { tts } = require('edge-tts');
+    const raw = String(req.query.text || '').trim();
+    const text = raw.slice(0, 420);
+    if (!text) return res.status(400).json({ message: 'text required' });
+
+    const requestedVoice = String(req.query.voice || '').trim();
+    const voiceCandidates = [
+      requestedVoice,
+      'ru-RU-DmitryNeural',
+      'ru-RU-MaximNeural',
+      'ru-RU-PavelNeural'
+    ].filter(Boolean);
+    const rate = String(req.query.rate || '-2%').trim() || '-2%';
+    let lastErr = null;
+
+    for (const voice of voiceCandidates) {
+      try {
+        const mp3 = await tts(text, {
+          voice,
+          rate,
+          volume: '+0%',
+          pitch: '-2Hz'
+        });
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-TTS-Voice', voice);
+        return res.send(Buffer.from(mp3));
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+
+    return res.status(502).json({ message: lastErr?.message || 'TTS provider unavailable' });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || 'TTS error' });
+  }
+});
+
 module.exports = router;
 
