@@ -588,7 +588,9 @@ router.get('/host-settings', async (req, res) => {
       mode: settings.mode || 'fixed',
       fixedEverySongs: Number(settings.fixedEverySongs) || 2,
       randomMinSongs: Number(settings.randomMinSongs) || 2,
-      randomMaxSongs: Number(settings.randomMaxSongs) || 5
+      randomMaxSongs: Number(settings.randomMaxSongs) || 5,
+      radioPlaylistMode: settings.radioPlaylistMode || 'random',
+      djTheme: settings.djTheme || 'auto'
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка чтения настроек ведущего' });

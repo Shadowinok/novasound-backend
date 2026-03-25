@@ -622,7 +622,9 @@ router.get('/radio-host-settings', async (req, res) => {
       mode: settings.mode || 'fixed',
       fixedEverySongs: Number(settings.fixedEverySongs) || 2,
       randomMinSongs: Number(settings.randomMinSongs) || 2,
-      randomMaxSongs: Number(settings.randomMaxSongs) || 5
+      randomMaxSongs: Number(settings.randomMaxSongs) || 5,
+      radioPlaylistMode: settings.radioPlaylistMode || 'random',
+      djTheme: settings.djTheme || 'auto'
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка чтения настроек ведущего' });
@@ -634,7 +636,9 @@ router.put('/radio-host-settings', [
   body('mode').isIn(['fixed', 'random']).withMessage('mode: fixed|random'),
   body('fixedEverySongs').optional({ nullable: true }).toInt(),
   body('randomMinSongs').optional({ nullable: true }).toInt(),
-  body('randomMaxSongs').optional({ nullable: true }).toInt()
+  body('randomMaxSongs').optional({ nullable: true }).toInt(),
+  body('radioPlaylistMode').optional({ nullable: true }).isIn(['random', 'dj']).withMessage('radioPlaylistMode: random|dj'),
+  body('djTheme').optional({ nullable: true }).isIn(['auto', 'mixed', 'energetic', 'chill', 'night', 'rock', 'pop', 'electro', 'hiphop', 'jazz']).withMessage('djTheme invalid')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -645,6 +649,8 @@ router.put('/radio-host-settings', [
     const randomMinSongs = Math.max(1, Math.min(20, Number(req.body.randomMinSongs) || 2));
     const randomMaxSongsRaw = Math.max(1, Math.min(20, Number(req.body.randomMaxSongs) || 5));
     const randomMaxSongs = Math.max(randomMinSongs, randomMaxSongsRaw);
+    const radioPlaylistMode = req.body.radioPlaylistMode === 'dj' ? 'dj' : 'random';
+    const djTheme = String(req.body.djTheme || 'auto');
 
     const settings = await RadioHostSettings.findOneAndUpdate(
       { key: 'main' },
@@ -654,6 +660,8 @@ router.put('/radio-host-settings', [
           fixedEverySongs,
           randomMinSongs,
           randomMaxSongs,
+          radioPlaylistMode,
+          djTheme,
           updatedBy: req.user._id
         }
       },
@@ -664,7 +672,9 @@ router.put('/radio-host-settings', [
       mode: settings.mode,
       fixedEverySongs: settings.fixedEverySongs,
       randomMinSongs: settings.randomMinSongs,
-      randomMaxSongs: settings.randomMaxSongs
+      randomMaxSongs: settings.randomMaxSongs,
+      radioPlaylistMode: settings.radioPlaylistMode || 'random',
+      djTheme: settings.djTheme || 'auto'
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка сохранения настроек ведущего' });

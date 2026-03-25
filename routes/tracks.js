@@ -13,6 +13,7 @@ const { getGridFS } = require('../config/gridfs');
 const cloudinary = require('../config/cloudinary');
 const { parseBuffer } = require('music-metadata');
 const TrackReport = require('../models/TrackReport');
+const RadioHostSettings = require('../models/RadioHostSettings');
 const {
   trackUploadIpLimiter,
   trackUploadUserLimiter,
@@ -21,6 +22,43 @@ const {
 } = require('../middleware/rateLimits');
 
 const router = express.Router();
+
+const DJ_THEME_GENRE_WEIGHTS = {
+  mixed: { 'rock-metal': 1, pop: 1, jazz: 1, 'hiphop-rap': 1, electronic: 1, other: 1 },
+  energetic: { electronic: 3, 'hiphop-rap': 2.4, 'rock-metal': 2.1, pop: 1.4, jazz: 0.6, other: 1 },
+  chill: { jazz: 3, pop: 1.8, electronic: 1.5, other: 1.5, 'hiphop-rap': 0.9, 'rock-metal': 0.6 },
+  night: { electronic: 2.7, jazz: 2.2, pop: 1.2, other: 1.4, 'hiphop-rap': 1, 'rock-metal': 0.7 },
+  rock: { 'rock-metal': 3.5, pop: 0.9, electronic: 1, 'hiphop-rap': 0.8, jazz: 0.6, other: 1 },
+  pop: { pop: 3.2, electronic: 1.5, 'hiphop-rap': 1.2, 'rock-metal': 0.8, jazz: 0.9, other: 1.1 },
+  electro: { electronic: 3.6, pop: 1.3, 'hiphop-rap': 1.2, 'rock-metal': 0.8, jazz: 0.7, other: 1 },
+  hiphop: { 'hiphop-rap': 3.5, electronic: 1.4, pop: 1.2, 'rock-metal': 0.7, jazz: 0.6, other: 1 },
+  jazz: { jazz: 3.8, electronic: 1.1, pop: 1.1, 'hiphop-rap': 0.8, 'rock-metal': 0.6, other: 1.3 }
+};
+
+function mulberry32(seed) {
+  // eslint-disable-next-line no-bitwise
+  return function rand() { let t = (seed += 0x6D2B79F5); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+function pickDjThemeAuto(windowKey) {
+  const pool = ['mixed', 'energetic', 'chill', 'night', 'rock', 'pop', 'electro', 'hiphop', 'jazz'];
+  return pool[Math.abs(Number(windowKey)) % pool.length];
+}
+
+function weightedShuffleByTheme(list, theme, seed) {
+  const weights = DJ_THEME_GENRE_WEIGHTS[theme] || DJ_THEME_GENRE_WEIGHTS.mixed;
+  const rand = mulberry32(seed);
+  return [...list]
+    .map((t, idx) => {
+      const g = String(t.genre || 'other');
+      const w = Number(weights[g]) || 1;
+      const u = Math.max(rand(), 1e-9);
+      const score = -Math.log(u) / w + idx * 1e-9;
+      return { t, score };
+    })
+    .sort((a, b) => a.score - b.score)
+    .map((x) => x.t);
+}
 
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -226,27 +264,23 @@ router.get('/radio/now', async (req, res) => {
       : 60 * 30; // 30 минут
     const windowKey = Math.floor(nowSec / shuffleWindowSec);
     const seedBase = windowKey * 1000003;
+    const settings = await RadioHostSettings.findOne({ key: 'main' }).lean();
+    const playlistMode = settings?.radioPlaylistMode === 'dj' ? 'dj' : 'random';
+    const configuredTheme = String(settings?.djTheme || 'auto');
+    const effectiveTheme = configuredTheme === 'auto' ? pickDjThemeAuto(windowKey) : configuredTheme;
 
-    // xmur3-ish seed -> mulberry32 PRNG
-    // eslint-disable-next-line no-bitwise
-    const mulberry32 = (a) => () => {
-      // eslint-disable-next-line no-bitwise
-      let t = (a += 0x6D2B79F5);
-      // eslint-disable-next-line no-bitwise
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      // eslint-disable-next-line no-bitwise
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      // eslint-disable-next-line no-bitwise
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-
-    const prng = mulberry32(seedBase + withDurations.length);
-    const shuffled = [...withDurations];
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(prng() * (i + 1));
-      const tmp = shuffled[i];
-      shuffled[i] = shuffled[j];
-      shuffled[j] = tmp;
+    let shuffled = [];
+    if (playlistMode === 'dj') {
+      shuffled = weightedShuffleByTheme(withDurations, effectiveTheme, seedBase + withDurations.length + 913);
+    } else {
+      const prng = mulberry32(seedBase + withDurations.length);
+      shuffled = [...withDurations];
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(prng() * (i + 1));
+        const tmp = shuffled[i];
+        shuffled[i] = shuffled[j];
+        shuffled[j] = tmp;
+      }
     }
 
     // В очередь берём ровно `limit`
@@ -285,6 +319,8 @@ router.get('/radio/now', async (req, res) => {
       queue: rotateQueue,
       queueIndex: 0,
       nowOffsetSec,
+      radioPlaylistMode: playlistMode,
+      djTheme: effectiveTheme,
       generatedAt: new Date().toISOString()
     });
   } catch (err) {
