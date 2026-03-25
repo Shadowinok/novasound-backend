@@ -35,6 +35,21 @@ const AI_FEEDS = [
     source: 'Цифровая индустрия',
     kind: 'industry-news',
     url: 'https://news.google.com/rss/search?q=%D1%86%D0%B8%D1%84%D1%80%D0%BE%D0%B2%D0%B0%D1%8F%20%D0%B8%D0%BD%D0%B4%D1%83%D1%81%D1%82%D1%80%D0%B8%D1%8F%20OR%20%D0%B2%20%D1%80%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B5%20OR%20%D0%B3%D0%BE%D1%82%D0%BE%D0%B2%D0%B8%D1%82%D1%81%D1%8F%20%D0%BA%20%D0%B2%D1%8B%D1%85%D0%BE%D0%B4%D1%83%20OR%20%D1%80%D0%B5%D0%BB%D0%B8%D0%B7%20OR%20%D0%BE%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20OR%20%D0%B0%D0%BF%D0%B4%D0%B5%D0%B9%D1%82%20OR%20%D1%82%D0%B5%D1%85%D0%BD%D0%BE%D0%BB%D0%BE%D0%B3%D0%B8%D0%B8%20OR%20%D0%B2%D1%8B%D0%BF%D1%83%D1%81%D0%BA%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%B4%D0%BE%D0%BD%D0%B1%D0%B0%D1%81%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B&hl=ru&gl=RU&ceid=RU:ru'
+  },
+  {
+    source: 'Софтовые сервисы',
+    kind: 'software-news',
+    url: 'https://news.google.com/rss/search?q=%D0%BF%D1%80%D0%B8%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D0%B5%20OR%20%D1%81%D0%B5%D1%80%D0%B2%D0%B8%D1%81%20OR%20%D0%BF%D0%BB%D0%B0%D1%82%D1%84%D0%BE%D1%80%D0%BC%D0%B0%20OR%20%D0%BE%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20OR%20%D0%B0%D0%BF%D0%B4%D0%B5%D0%B9%D1%82%20OR%20%D1%80%D0%B5%D0%BB%D0%B8%D0%B7%20OR%20%D1%84%D0%B8%D1%87%D0%B0%20OR%20SDK%20OR%20API%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D1%81%D0%B0%D0%BD%D0%BA%D1%86%D0%B8%D0%B8%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE&hl=ru&gl=RU&ceid=RU:ru'
+  },
+  {
+    source: 'Роботы',
+    kind: 'robots-news',
+    url: 'https://news.google.com/rss/search?q=%D1%80%D0%BE%D0%B1%D0%BE%D1%82%20OR%20%D1%80%D0%BE%D0%B1%D0%BE%D1%82%D0%BE%D1%82%D0%B5%D1%85%D0%BD%D0%B8%D0%BA%D0%B0%20OR%20%D0%B0%D0%B2%D1%82%D0%BE%D0%BC%D0%B0%D1%82%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%20OR%20%D0%BC%D0%B5%D1%85%D0%B0%D1%82%D1%80%D0%BE%D0%BD%D0%B8%D0%BA%D0%B0%20OR%20%D0%B0%D0%B2%D1%82%D0%BE%D0%BC%D0%B0%D1%82%D0%B8%D1%87%D0%B5%D1%81%D0%BA%D0%B0%D1%8F%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D0%B4%D0%BE%D0%BD%D0%B1%D0%B0%D1%81%20-%D1%81%D0%B0%D0%BD%D0%BA%D1%86%D0%B8%D0%B8%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B%20-%D0%B1%D0%B5%D1%81%D0%BF%D0%B8%D0%BB%D0%BE%D1%82%D0%BD%D1%8B%D0%B9%20-%D0%B4%D1%80%D0%BE%D0%BD%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE&hl=ru&gl=RU&ceid=RU:ru'
+  },
+  {
+    source: 'Релизы и индустрия',
+    kind: 'releases-news',
+    url: 'https://news.google.com/rss/search?q=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7%20OR%20%D0%B2%D1%8B%D1%85%D0%BE%D0%B4%D0%B8%D1%82%20OR%20%D0%B2%D1%8B%D1%85%D0%BE%D0%B4%D0%B8%D1%82%D1%81%D1%8F%20OR%20%D0%B2%D1%8B%D0%B9%D0%B4%D1%83%D1%82%20OR%20%D0%B0%D0%BD%D0%BE%D0%BD%D1%81%20OR%20%D0%B3%D0%BE%D1%82%D0%BE%D0%B2%D0%B8%D1%82%D1%81%D1%8F%20%D0%BA%20%D0%B2%D1%8B%D1%85%D0%BE%D0%B4%D1%83%20OR%20%D0%BE%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20OR%20%D0%B0%D0%BF%D0%B4%D0%B5%D0%B9%D1%82%20OR%20%D0%B2%D1%8B%D0%BF%D1%83%D1%81%D0%BA%20-%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0%20-%D0%B0%D1%80%D0%BC%D0%B8%D1%8F%20-%D0%BC%D0%B8%D0%BD%D0%BE%D0%B1%D0%BE%D1%80%D0%BE%D0%BD%D1%8B%20-%D1%81%D0%B0%D0%BD%D0%BA%D1%86%D0%B8%D0%B8%20-%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D1%8B%20-%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE%20-%D0%B4%D0%BE%D0%BD%D0%B1%D0%B0%D1%81&hl=ru&gl=RU&ceid=RU:ru'
   }
 ];
 
@@ -138,8 +153,9 @@ function containsGameKeywords(title) {
   const t = safeText(title).toLowerCase();
   if (!t) return false;
   const good = [
-    'игр', 'игра', 'геймплей', 'трейлер', 'релиз', 'обновлен', 'патч', 'студ',
-    'разработ', 'проект', 'выйдет', 'консоль', 'steam', 'vr', 'ar'
+    // максимально “игровые” маркеры
+    'игр', 'игра', 'геймплей', 'трейлер', 'консоль', 'steam', 'vr', 'ar',
+    'патч', 'апдей', 'обновлен', 'релиз', 'выйдет', 'выпуск', 'студ', 'разработ'
   ];
   return good.some((k) => t.includes(k));
 }
@@ -148,9 +164,10 @@ function containsFilmKeywords(title) {
   const t = safeText(title).toLowerCase();
   if (!t) return false;
   const good = [
+    // максимально “киношные” маркеры
     'кино', 'фильм', 'сериал', 'промьера', 'премьер', 'премьера', 'трейлер',
-    'съёмк', 'съемк', 'снима', 'запис', 'озвучк', 'директор', 'режисс',
-    'анимац'
+    'съёмк', 'съемк', 'съём', 'съем', 'снима', 'запис', 'озвучк', 'директор', 'режисс',
+    'анимац', 'студия'
   ];
   return good.some((k) => t.includes(k));
 }
@@ -159,10 +176,52 @@ function containsIndustryKeywords(title) {
   const t = safeText(title).toLowerCase();
   if (!t) return false;
   const good = [
-    'цифров', 'индустр', 'в разработк', 'готовит', 'выпуск', 'релиз',
-    'обновлен', 'апдейт', 'технолог', 'платформ', 'прорыв', 'выходит', 'выйдет'
+    // Индустрия: только про технологии/платформы, без “выйдет/релиз” (они слишком широкие).
+    'цифров', 'индустр', 'технолог', 'платформ', 'облако', 'вычисл', 'алгоритм',
+    'прилож', 'система', 'движок', 'архитект', 'проект', 'платёж'
   ];
   return good.some((k) => t.includes(k));
+}
+
+function containsSoftwareKeywords(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+  const good = [
+    // софт/сервисы: больше про “что именно” и меньше про “релиз вообще”
+    'приложен', 'прилож', 'сервис', 'платформ', 'апдейт', 'фича',
+    'sdk', 'api', 'функц', 'интеграц', 'библиотек', 'документац', 'верси'
+  ];
+  return good.some((k) => t.includes(k));
+}
+
+function containsRobotsKeywords(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+  const good = [
+    'робот', 'робото', 'робототехн', 'автоматизац', 'мехатрон', 'автономн',
+    'модуль', 'манипулятор'
+  ];
+  return good.some((k) => t.includes(k));
+}
+
+function containsReleasesKeywords(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+
+  // Релизы: требуем и “про релиз”, и “про продукт/технологии”, чтобы не цеплять лишний мусор.
+  const releaseWords = [
+    'релиз', 'выйдет', 'выйдут', 'выходит', 'выпуск', 'анонс', 'готовитс', 'готовится',
+    'апдейт', 'обновлен', 'представ', 'поступит', 'верси', 'патч', 'демо'
+  ];
+
+  const domainWords = [
+    'технолог', 'платформ', 'софт', 'сервис', 'прилож', 'игр', 'кино', 'музык', 'аудио',
+    'индустр', 'платёж', 'облако', 'sdk', 'api', 'движок', 'алгоритм', 'модель'
+  ];
+
+  const hasRelease = releaseWords.some((k) => t.includes(k));
+  const hasDomain = domainWords.some((k) => t.includes(k));
+  return hasRelease && hasDomain;
 }
 
 function acceptAiTitle(title, kind) {
@@ -177,6 +236,9 @@ function acceptAiTitle(title, kind) {
   if (kind === 'gaming-news') return containsGameKeywords(clean);
   if (kind === 'film-news') return containsFilmKeywords(clean);
   if (kind === 'industry-news') return containsIndustryKeywords(clean);
+  if (kind === 'software-news') return containsSoftwareKeywords(clean);
+  if (kind === 'robots-news') return containsRobotsKeywords(clean);
+  if (kind === 'releases-news') return containsReleasesKeywords(clean);
   return containsMusicKeywords(clean);
 }
 
