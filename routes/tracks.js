@@ -194,11 +194,13 @@ router.get('/radio/now', async (req, res) => {
   try {
     const rawLimit = Number(req.query.limit);
     const limit = Number.isFinite(rawLimit) ? Math.max(5, Math.min(rawLimit, 100)) : 30;
+    // Берём больше треков, чтобы можно было перемешать и всё равно выдать `limit` очереди.
+    const fetchLimit = Math.max(limit, Math.min(limit * 3, 120));
     const tracks = await Track.find({ status: 'approved' })
       .select('-coverImagePending -coverChangeStatus -coverModerationComment')
       .populate('author', 'username')
       .sort({ createdAt: 1, _id: 1 })
-      .limit(limit)
+      .limit(fetchLimit)
       .lean();
 
     if (!tracks.length) {
@@ -216,13 +218,46 @@ router.get('/radio/now', async (req, res) => {
       duration: Number.isFinite(Number(t.duration)) && Number(t.duration) > 0 ? Number(t.duration) : 180
     }));
 
-    const cycleDuration = withDurations.reduce((sum, t) => sum + t.duration, 0);
+    // Делаем порядок очереди "рандомным", но детерминированным для всех:
+    // сид зависит от текущего временного окна (чтобы эфир обновлялся не каждую секунду).
     const nowSec = Math.floor(Date.now() / 1000);
+    const shuffleWindowSec = Number.isFinite(Number(req.query.shuffleWindowSec))
+      ? Math.max(60, Number(req.query.shuffleWindowSec))
+      : 60 * 30; // 30 минут
+    const windowKey = Math.floor(nowSec / shuffleWindowSec);
+    const seedBase = windowKey * 1000003;
+
+    // xmur3-ish seed -> mulberry32 PRNG
+    // eslint-disable-next-line no-bitwise
+    const mulberry32 = (a) => () => {
+      // eslint-disable-next-line no-bitwise
+      let t = (a += 0x6D2B79F5);
+      // eslint-disable-next-line no-bitwise
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      // eslint-disable-next-line no-bitwise
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      // eslint-disable-next-line no-bitwise
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    const prng = mulberry32(seedBase + withDurations.length);
+    const shuffled = [...withDurations];
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(prng() * (i + 1));
+      const tmp = shuffled[i];
+      shuffled[i] = shuffled[j];
+      shuffled[j] = tmp;
+    }
+
+    // В очередь берём ровно `limit`
+    const orderedQueue = shuffled.slice(0, limit);
+
+    const cycleDuration = orderedQueue.reduce((sum, t) => sum + t.duration, 0);
     let pos = cycleDuration > 0 ? (nowSec % cycleDuration) : 0;
 
     let currentIndex = 0;
-    for (let i = 0; i < withDurations.length; i += 1) {
-      const d = withDurations[i].duration;
+    for (let i = 0; i < orderedQueue.length; i += 1) {
+      const d = orderedQueue[i].duration;
       if (pos < d) {
         currentIndex = i;
         break;
@@ -230,24 +265,24 @@ router.get('/radio/now', async (req, res) => {
       pos -= d;
     }
 
-    const orderedQueue = [
-      ...withDurations.slice(currentIndex),
-      ...withDurations.slice(0, currentIndex)
+    const rotateQueue = [
+      ...orderedQueue.slice(currentIndex),
+      ...orderedQueue.slice(0, currentIndex)
     ];
 
-    const nowTrack = orderedQueue[0];
+    const nowTrack = rotateQueue[0];
     const nowOffsetSec = Math.max(0, Math.min(nowTrack.duration, Math.floor(pos)));
     const history = [];
     for (let i = 1; i <= 5; i += 1) {
-      const idx = (withDurations.length + currentIndex - i) % withDurations.length;
-      history.push(withDurations[idx]);
+      const idx = (orderedQueue.length + currentIndex - i) % orderedQueue.length;
+      history.push(orderedQueue[idx]);
     }
 
     res.json({
       now: nowTrack,
-      next: orderedQueue.slice(1, 6),
+      next: rotateQueue.slice(1, 6),
       history,
-      queue: orderedQueue,
+      queue: rotateQueue,
       queueIndex: 0,
       nowOffsetSec,
       generatedAt: new Date().toISOString()
