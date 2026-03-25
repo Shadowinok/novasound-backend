@@ -40,9 +40,64 @@ function mulberry32(seed) {
   return function rand() { let t = (seed += 0x6D2B79F5); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
-function pickDjThemeAuto(windowKey) {
-  const pool = ['mixed', 'energetic', 'chill', 'night', 'rock', 'pop', 'electro', 'hiphop', 'jazz'];
-  return pool[Math.abs(Number(windowKey)) % pool.length];
+function getMskHour() {
+  try {
+    const fmt = new Intl.DateTimeFormat('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      hour: '2-digit',
+      hour12: false
+    });
+    const s = fmt.format(new Date());
+    const h = Number(s);
+    return Number.isFinite(h) ? h : new Date().getHours();
+  } catch (_) {
+    return new Date().getHours();
+  }
+}
+
+function pickDjEpisodeAuto(episodeKey) {
+  const mskHour = getMskHour();
+  // eslint-disable-next-line no-bitwise
+  const rand = mulberry32(episodeKey * 1000003 + 777);
+
+  const morningTags = ['в москве дождит', 'кофе на автопилоте', 'утро в тёплом шуме', 'рассвет и город на минималках'];
+  const morningSadTags = ['утренняя грустняшка', 'серое, но стильно', 'чуть-чуть меланхолии', 'дождь, наушники, тишина'];
+  const nightTags = ['ночной режим', 'город шепчет на минималке', 'тёмный чилл', 'после полуночи всё вкуснее'];
+
+  let moodType = 'mixed';
+  let effectiveTheme = 'mixed';
+  let tag = '';
+
+  // Условно: утро/ночь (остальное считаем "смешанным", чтобы не было пусто)
+  const isMorning = mskHour >= 6 && mskHour < 12;
+  const isNight = mskHour >= 23 || mskHour < 5;
+
+  if (isMorning) {
+    if (rand() < 0.55) {
+      moodType = 'morning_chill';
+      effectiveTheme = 'chill';
+      tag = morningTags[Math.floor(rand() * morningTags.length)];
+    } else {
+      moodType = 'morning_sad';
+      effectiveTheme = 'jazz';
+      tag = morningSadTags[Math.floor(rand() * morningSadTags.length)];
+    }
+  } else if (isNight) {
+    moodType = 'night_chill';
+    effectiveTheme = 'night';
+    tag = nightTags[Math.floor(rand() * nightTags.length)];
+  } else {
+    moodType = 'mixed';
+    effectiveTheme = rand() < 0.4 ? 'energetic' : 'mixed';
+    tag = nightTags[Math.floor(rand() * nightTags.length)];
+  }
+
+  return {
+    id: String(episodeKey),
+    moodType,
+    tag,
+    effectiveTheme
+  };
 }
 
 function weightedShuffleByTheme(list, theme, seed) {
@@ -267,7 +322,30 @@ router.get('/radio/now', async (req, res) => {
     const settings = await RadioHostSettings.findOne({ key: 'main' }).lean();
     const playlistMode = settings?.radioPlaylistMode === 'dj' ? 'dj' : 'random';
     const configuredTheme = String(settings?.djTheme || 'auto');
-    const effectiveTheme = configuredTheme === 'auto' ? pickDjThemeAuto(windowKey) : configuredTheme;
+
+    const episodeWindowSec = 60 * 60; // 1 час
+    const episodeKey = Math.floor(nowSec / episodeWindowSec);
+
+    let effectiveTheme = configuredTheme;
+    let djEpisode = null;
+    if (playlistMode === 'dj') {
+      if (configuredTheme === 'auto') {
+        const ep = pickDjEpisodeAuto(episodeKey);
+        effectiveTheme = ep.effectiveTheme;
+        djEpisode = {
+          id: ep.id,
+          moodType: ep.moodType,
+          tag: ep.tag
+        };
+      } else {
+        effectiveTheme = configuredTheme;
+        djEpisode = {
+          id: String(episodeKey),
+          moodType: 'custom',
+          tag: String(configuredTheme)
+        };
+      }
+    }
 
     let shuffled = [];
     if (playlistMode === 'dj') {
@@ -321,6 +399,7 @@ router.get('/radio/now', async (req, res) => {
       nowOffsetSec,
       radioPlaylistMode: playlistMode,
       djTheme: effectiveTheme,
+      djEpisode,
       generatedAt: new Date().toISOString()
     });
   } catch (err) {
