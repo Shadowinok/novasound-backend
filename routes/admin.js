@@ -6,6 +6,7 @@ const User = require('../models/User');
 const ListenLog = require('../models/ListenLog');
 const TrackReport = require('../models/TrackReport');
 const Announcement = require('../models/Announcement');
+const RadioHostSettings = require('../models/RadioHostSettings');
 const { getGridFS } = require('../config/gridfs');
 const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
@@ -606,6 +607,67 @@ router.delete('/announcements/:id', [
     res.json({ message: 'Анонс удалён' });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// GET /api/admin/radio-host-settings — настройки периодичности ведущего
+router.get('/radio-host-settings', async (req, res) => {
+  try {
+    let settings = await RadioHostSettings.findOne({ key: 'main' }).lean();
+    if (!settings) {
+      const created = await RadioHostSettings.create({ key: 'main' });
+      settings = created.toObject();
+    }
+    res.json({
+      mode: settings.mode || 'fixed',
+      fixedEverySongs: Number(settings.fixedEverySongs) || 2,
+      randomMinSongs: Number(settings.randomMinSongs) || 2,
+      randomMaxSongs: Number(settings.randomMaxSongs) || 5
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка чтения настроек ведущего' });
+  }
+});
+
+// PUT /api/admin/radio-host-settings — обновить режим периодичности ведущего
+router.put('/radio-host-settings', [
+  body('mode').isIn(['fixed', 'random']).withMessage('mode: fixed|random'),
+  body('fixedEverySongs').optional({ nullable: true }).toInt(),
+  body('randomMinSongs').optional({ nullable: true }).toInt(),
+  body('randomMaxSongs').optional({ nullable: true }).toInt()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const mode = String(req.body.mode || 'fixed');
+    const fixedEverySongs = Math.max(1, Math.min(20, Number(req.body.fixedEverySongs) || 2));
+    const randomMinSongs = Math.max(1, Math.min(20, Number(req.body.randomMinSongs) || 2));
+    const randomMaxSongsRaw = Math.max(1, Math.min(20, Number(req.body.randomMaxSongs) || 5));
+    const randomMaxSongs = Math.max(randomMinSongs, randomMaxSongsRaw);
+
+    const settings = await RadioHostSettings.findOneAndUpdate(
+      { key: 'main' },
+      {
+        $set: {
+          mode,
+          fixedEverySongs,
+          randomMinSongs,
+          randomMaxSongs,
+          updatedBy: req.user._id
+        }
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    res.json({
+      mode: settings.mode,
+      fixedEverySongs: settings.fixedEverySongs,
+      randomMinSongs: settings.randomMinSongs,
+      randomMaxSongs: settings.randomMaxSongs
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка сохранения настроек ведущего' });
   }
 });
 

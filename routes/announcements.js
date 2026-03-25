@@ -1,6 +1,7 @@
 const express = require('express');
 const Track = require('../models/Track');
 const Announcement = require('../models/Announcement');
+const RadioHostSettings = require('../models/RadioHostSettings');
 const { XMLParser } = require('fast-xml-parser');
 
 const router = express.Router();
@@ -572,6 +573,25 @@ router.get('/', async (req, res) => {
     res.json({ items, generatedAt: new Date().toISOString() });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// Публичные настройки периодичности ведущего
+router.get('/host-settings', async (req, res) => {
+  try {
+    let settings = await RadioHostSettings.findOne({ key: 'main' }).lean();
+    if (!settings) {
+      const created = await RadioHostSettings.create({ key: 'main' });
+      settings = created.toObject();
+    }
+    res.json({
+      mode: settings.mode || 'fixed',
+      fixedEverySongs: Number(settings.fixedEverySongs) || 2,
+      randomMinSongs: Number(settings.randomMinSongs) || 2,
+      randomMaxSongs: Number(settings.randomMaxSongs) || 5
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка чтения настроек ведущего' });
   }
 });
 
