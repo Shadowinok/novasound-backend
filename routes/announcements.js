@@ -110,6 +110,50 @@ function stripGoogleNewsSuffix(title) {
   return t;
 }
 
+function normalizeNewsTitle(title) {
+  const base = stripGoogleNewsSuffix(title)
+    .toLowerCase()
+    .replace(/[«»"“”'`]/g, ' ')
+    .replace(/[.,!?;:()[\]{}|\\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Служебные/частые слова, не влияющие на смысл заголовка.
+  const stop = new Set([
+    'в', 'во', 'на', 'и', 'или', 'к', 'по', 'про', 'для', 'с', 'со', 'из', 'о', 'об',
+    'от', 'до', 'за', 'над', 'под', 'не', 'это', 'как', 'что', 'кто', 'где', 'у', 'а',
+    'но', 'же', 'ли', 'the'
+  ]);
+  const tokens = base.split(' ').filter((w) => w && !stop.has(w));
+  return tokens.join(' ');
+}
+
+function titleTokenSet(title) {
+  return new Set(normalizeNewsTitle(title).split(' ').filter(Boolean));
+}
+
+function areTitlesNearDuplicate(a, b) {
+  const na = normalizeNewsTitle(a);
+  const nb = normalizeNewsTitle(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  // Вложенность (один заголовок — расширенная версия другого)
+  if (na.length > 28 && nb.length > 28 && (na.includes(nb) || nb.includes(na))) return true;
+
+  const sa = titleTokenSet(na);
+  const sb = titleTokenSet(nb);
+  if (!sa.size || !sb.size) return false;
+  let inter = 0;
+  for (const t of sa) {
+    if (sb.has(t)) inter += 1;
+  }
+  const union = sa.size + sb.size - inter;
+  const jaccard = union > 0 ? inter / union : 0;
+
+  // Достаточно строгий порог, чтобы не склеивать разные новости.
+  return jaccard >= 0.78;
+}
+
 function isPoliticalOrWarJunk(title) {
   const t = safeText(title).toLowerCase();
   if (!t) return true;
@@ -366,15 +410,20 @@ async function getAiNewsCached(maxItems = 8) {
   const results = await Promise.all(AI_FEEDS.map(fetchAiFeed));
   const merged = results.flat();
 
-  // Уберём дубликаты по title (и снова проверим русский)
+  // Уберём дубли (точные и почти одинаковые по смыслу)
   const seen = new Set();
+  const seenTitles = [];
   const deduped = [];
   for (const it of merged) {
     const title = stripGoogleNewsSuffix(it.title);
     if (!acceptAiTitle(title, it.kind)) continue;
-    const key = safeText(title).toLowerCase();
+    const key = normalizeNewsTitle(title);
     if (!key || seen.has(key)) continue;
+    // Защита от “похожих дублей” между разными источниками.
+    const isNearDup = seenTitles.some((prev) => areTitlesNearDuplicate(prev, title));
+    if (isNearDup) continue;
     seen.add(key);
+    seenTitles.push(title);
     deduped.push({
       ...it,
       title: safeText(title).slice(0, 140)
