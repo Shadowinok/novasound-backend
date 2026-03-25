@@ -143,10 +143,41 @@ function containsCreativeKeywords(title) {
   const t = safeText(title).toLowerCase();
   if (!t) return false;
   const good = [
+    // Для креатива: важно, чтобы это выглядело как медиа/визуал/озвучка.
+    // Если это не “визуальный”/“медийный” креатив — всё равно отфильтруем на unwanted-темах.
     'нейросет', 'генерац', 'изображ', 'картин', 'обложк', 'дизайн', 'постер', 'арт',
     'видео', 'ролик', 'монтаж', 'озвучк', 'диктор', '3d', 'рендер', 'анимац'
   ];
   return good.some((k) => t.includes(k));
+}
+
+function isUnwantedAiTopic(title, kind) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+
+  // Это то, что ты прямо просил выкинуть.
+  // Применяем только к "ИИ-креатив", чтобы не резать игровое/киношное/музыкальное.
+  if (kind === 'ai-creative-news') {
+    const bad = [
+      // образование
+      'школ', 'учеб', 'образован', 'за парт',
+      // наркотики/пропаганда
+      'наркот', 'пропаганд',
+      // граффити/нелегальная реклама
+      'графит', 'граффит', 'реклам', 'нелегальн',
+      // фонды/стартапы/агенты
+      'фонд', 'стартап', 'агент'
+    ];
+    if (bad.some((k) => t.includes(k))) return true;
+
+    // "обложка книги ... искусственный интеллект" — выкидываем по примеру.
+    if (t.includes('обложк') && (t.includes('книга') || t.includes('книг'))) {
+      const hasAiAngle = t.includes('искусствен') || t.includes('интеллект') || t.includes('ии') || t.includes('нейросет');
+      if (hasAiAngle) return true;
+    }
+  }
+
+  return false;
 }
 
 function containsGameKeywords(title) {
@@ -228,6 +259,7 @@ function acceptAiTitle(title, kind) {
   const clean = stripGoogleNewsSuffix(title);
   if (!looksRussian(clean)) return false;
   if (isPoliticalOrWarJunk(clean)) return false;
+  if (isUnwantedAiTopic(clean, kind)) return false;
   // Разнообразим: 
   // - ai-music-news: только музыка/аудио
   // - ai-creative-news: только творчество (обложки, изображения, видео, озвучка и т.п.)
