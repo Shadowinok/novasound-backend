@@ -30,6 +30,16 @@ const radioHostSettingsSchema = new mongoose.Schema({
     min: 1,
     max: 20
   },
+  radioPlaylistMode: {
+    type: String,
+    enum: ['random', 'dj'],
+    default: 'random'
+  },
+  djTheme: {
+    type: String,
+    enum: ['auto', 'mixed', 'energetic', 'chill', 'night', 'rock', 'pop', 'electro', 'hiphop', 'jazz'],
+    default: 'auto'
+  },
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
