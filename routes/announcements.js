@@ -1,5 +1,6 @@
 const express = require('express');
 const Track = require('../models/Track');
+const Announcement = require('../models/Announcement');
 
 const router = express.Router();
 
@@ -57,13 +58,38 @@ router.get('/', async (req, res) => {
         : 0;
     }
 
-    const latestNeeded = Math.max(0, limit - (nowTrack ? 1 : 0));
+    const items = [];
+    // 1) админские анонсы (закреп + срок жизни)
+    const now = new Date();
+    const manual = await Announcement.find({
+      $or: [
+        { expiresAt: null },
+        { expiresAt: { $gt: now } }
+      ]
+    })
+      .populate('trackId', 'title author')
+      .sort({ pinned: -1, pinnedOrder: 1, createdAt: -1 })
+      .limit(Math.max(1, Math.min(limit, 12)))
+      .lean();
+
+    for (const a of manual) {
+      items.push({
+        kind: 'announcement',
+        announcementId: a._id,
+        title: a.title,
+        message: a.message || '',
+        trackId: a.trackId?._id || null
+      });
+    }
+
+    // 2) эфир и новинки для заполнения лимита
+    const latestNeeded = Math.max(0, limit - items.length);
     const latestTracks = latestNeeded
       ? await Track.find({ status: 'approved' })
         .select('-coverImagePending -coverChangeStatus -coverModerationComment')
         .populate('author', 'username')
         .sort({ createdAt: -1 })
-        .limit(latestNeeded + 2) // чуть запас, чтобы убрать совпадения
+        .limit(latestNeeded + 2)
         .lean()
       : [];
 
@@ -71,7 +97,6 @@ router.get('/', async (req, res) => {
       ? latestTracks.filter((t) => String(t._id) !== String(nowTrack._id)).slice(0, latestNeeded)
       : latestTracks.slice(0, latestNeeded);
 
-    const items = [];
     if (nowTrack) {
       items.push({
         kind: 'radio',
