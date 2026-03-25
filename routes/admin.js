@@ -5,6 +5,7 @@ const Playlist = require('../models/Playlist');
 const User = require('../models/User');
 const ListenLog = require('../models/ListenLog');
 const TrackReport = require('../models/TrackReport');
+const Announcement = require('../models/Announcement');
 const { getGridFS } = require('../config/gridfs');
 const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
@@ -464,6 +465,145 @@ router.put('/tracks/:id/reject', [
     ).populate('author', 'username').lean();
     if (!track) return res.status(404).json({ message: 'Трек не найден' });
     res.json(track);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET /api/admin/announcements — все ручные анонсы
+router.get('/announcements', async (req, res) => {
+  try {
+    const list = await Announcement.find({})
+      .populate('createdBy', 'username')
+      .sort({ pinned: -1, pinnedOrder: 1, createdAt: -1 })
+      .lean();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/admin/announcements — создать ручной анонс
+router.post('/announcements', [
+  body('title').optional({ nullable: true }).trim().isLength({ min: 1, max: 200 }).withMessage('title: 1-200 символов'),
+  body('message').optional({ nullable: true }).trim().isLength({ max: 2000 }).withMessage('message: до 2000 символов'),
+  body('trackId').optional({ nullable: true }).trim(),
+  body('pinned').optional({ nullable: true }),
+  body('pinnedOrder').optional({ nullable: true }).toInt(),
+  body('expiresAt').optional({ nullable: true }).trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const title = String(req.body.title || '').trim();
+    if (!title) return res.status(400).json({ message: 'Укажите title' });
+
+    const message = req.body.message ? String(req.body.message).trim() : '';
+
+    const trackIdRaw = req.body.trackId ? String(req.body.trackId).trim() : '';
+    const trackId = trackIdRaw && trackIdRaw !== 'null' && trackIdRaw !== 'undefined' ? trackIdRaw : null;
+
+    // pinned может приходить строкой из формы
+    const pinned = req.body.pinned === true || String(req.body.pinned) === 'true';
+    const pinnedOrder =
+      Number.isFinite(Number(req.body.pinnedOrder)) && Number(req.body.pinnedOrder) >= 0 ? Number(req.body.pinnedOrder) : 100;
+
+    const expiresAtRaw = req.body.expiresAt ? String(req.body.expiresAt).trim() : '';
+    const expiresAt = expiresAtRaw ? new Date(expiresAtRaw) : null;
+    const expiresAtSafe = expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null;
+
+    // trackId допускается null/пустой, но если передан невалидный — отклоним
+    if (trackId) {
+      if (!mongoose.Types.ObjectId.isValid(trackId)) return res.status(400).json({ message: 'Некорректный trackId' });
+    }
+
+    const created = await Announcement.create({
+      title,
+      message,
+      trackId,
+      pinned,
+      pinnedOrder,
+      expiresAt: pinned ? expiresAtSafe : expiresAtSafe, // показываем и неп pinned (если expiresAt задан)
+      createdBy: req.user._id
+    });
+
+    const populated = await Announcement.findById(created._id)
+      .populate('createdBy', 'username')
+      .lean();
+
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PUT /api/admin/announcements/:id — обновить ручной анонс
+router.put('/announcements/:id', [
+  param('id').isMongoId(),
+  body('title').optional({ nullable: true }).trim().isLength({ min: 1, max: 200 }),
+  body('message').optional({ nullable: true }).trim().isLength({ max: 2000 }),
+  body('trackId').optional({ nullable: true }).trim(),
+  body('pinned').optional({ nullable: true }),
+  body('pinnedOrder').optional({ nullable: true }).toInt(),
+  body('expiresAt').optional({ nullable: true }).trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const id = req.params.id;
+
+    const doc = await Announcement.findById(id);
+    if (!doc) return res.status(404).json({ message: 'Анонс не найден' });
+
+    const title = req.body.title !== undefined ? String(req.body.title || '').trim() : doc.title;
+    if (!title) return res.status(400).json({ message: 'Укажите title' });
+
+    const message = req.body.message !== undefined ? (req.body.message ? String(req.body.message).trim() : '') : doc.message;
+
+    const trackIdRaw = req.body.trackId !== undefined ? (req.body.trackId ? String(req.body.trackId).trim() : '') : doc.trackId;
+    const trackId = trackIdRaw && trackIdRaw !== 'null' && trackIdRaw !== 'undefined' ? trackIdRaw : null;
+    if (trackId && !mongoose.Types.ObjectId.isValid(trackId)) return res.status(400).json({ message: 'Некорректный trackId' });
+
+    const pinned = req.body.pinned !== undefined ? (req.body.pinned === true || String(req.body.pinned) === 'true') : doc.pinned;
+    const pinnedOrder =
+      req.body.pinnedOrder !== undefined && Number.isFinite(Number(req.body.pinnedOrder)) && Number(req.body.pinnedOrder) >= 0
+        ? Number(req.body.pinnedOrder)
+        : doc.pinnedOrder;
+
+    const expiresAtRaw = req.body.expiresAt !== undefined ? (req.body.expiresAt ? String(req.body.expiresAt).trim() : '') : null;
+    const expiresAt = expiresAtRaw ? new Date(expiresAtRaw) : null;
+    const expiresAtSafe = expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null;
+
+    doc.title = title;
+    doc.message = message;
+    doc.trackId = trackId;
+    doc.pinned = pinned;
+    doc.pinnedOrder = pinnedOrder;
+    doc.expiresAt = expiresAtSafe;
+
+    await doc.save();
+
+    const populated = await Announcement.findById(doc._id)
+      .populate('createdBy', 'username')
+      .lean();
+
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE /api/admin/announcements/:id — удалить анонс
+router.delete('/announcements/:id', [
+  param('id').isMongoId()
+], async (req, res) => {
+  try {
+    const id = req.params.id;
+    const deleted = await Announcement.findByIdAndDelete(id);
+    if (!deleted) return res.status(404).json({ message: 'Анонс не найден' });
+    res.json({ message: 'Анонс удалён' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
