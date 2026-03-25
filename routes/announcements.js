@@ -59,6 +59,25 @@ router.get('/', async (req, res) => {
     }
 
     const items = [];
+    const hasRadio = !!tracksForCycle.length;
+    // Сначала — эфир (чтобы лента всегда начиналась с "В эфире/офлайн").
+    if (nowTrack) {
+      items.push({
+        kind: 'radio',
+        trackId: nowTrack._id,
+        title: nowTrack.title,
+        author: nowTrack.author?.username || 'Автор',
+        offsetSec: nowOffsetSec
+      });
+    } else if (!hasRadio) {
+      items.push({
+        kind: 'radio-offline',
+        trackId: null,
+        title: 'Эфир оффлайн',
+        author: '',
+        offsetSec: 0
+      });
+    }
     // 1) админские анонсы (закреп + срок жизни)
     const now = new Date();
     const manual = await Announcement.find({
@@ -96,16 +115,6 @@ router.get('/', async (req, res) => {
     const latestFiltered = nowTrack
       ? latestTracks.filter((t) => String(t._id) !== String(nowTrack._id)).slice(0, latestNeeded)
       : latestTracks.slice(0, latestNeeded);
-
-    if (nowTrack) {
-      items.push({
-        kind: 'radio',
-        trackId: nowTrack._id,
-        title: nowTrack.title,
-        author: nowTrack.author?.username || 'Автор',
-        offsetSec: nowOffsetSec
-      });
-    }
 
     items.push(
       ...latestFiltered.map((t) => ({
