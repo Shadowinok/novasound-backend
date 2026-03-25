@@ -5,10 +5,20 @@ const { XMLParser } = require('fast-xml-parser');
 
 const router = express.Router();
 
+// Русские ленты (главное требование — русский язык).
+// Используем news.google.com RSS поиск с ru-RU параметрами: обычно заголовки на русском,
+// плюс ниже фильтруем по кириллице, чтобы не проскакивал английский.
 const AI_FEEDS = [
-  { source: 'OpenAI', url: 'https://openai.com/blog/rss.xml' },
-  { source: 'Hugging Face', url: 'https://huggingface.co/blog/feed.xml' },
-  { source: 'Google AI', url: 'https://blog.google/technology/ai/rss/' }
+  {
+    source: 'ИИ',
+    kind: 'ai-news',
+    url: 'https://news.google.com/rss/search?q=%D0%B8%D1%81%D0%BA%D1%83%D1%81%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9%20%D0%B8%D0%BD%D1%82%D0%B5%D0%BB%D0%BB%D0%B5%D0%BA%D1%82%20OR%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%D1%81%D0%B5%D1%82%D1%8C%20OR%20ChatGPT&hl=ru&gl=RU&ceid=RU:ru'
+  },
+  {
+    source: 'ИИ-музыка',
+    kind: 'ai-music-news',
+    url: 'https://news.google.com/rss/search?q=%D0%B8%D0%B8%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%D1%81%D0%B5%D1%82%D1%8C%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20OR%20%D0%BC%D1%83%D0%B7%D1%8B%D0%BA%D0%B0%20%D1%81%20%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D1%8C%D1%8E%20%D0%B8%D0%B8%20OR%20AI%20music&hl=ru&gl=RU&ceid=RU:ru'
+  }
 ];
 
 const WEATHER_POINTS = [
@@ -56,6 +66,18 @@ function safeText(v) {
   return String(v).replace(/\s+/g, ' ').trim();
 }
 
+function looksRussian(text) {
+  return /[А-Яа-яЁё]/.test(String(text || ''));
+}
+
+function stripGoogleNewsSuffix(title) {
+  // В Google News часто "Заголовок - Издание"
+  const t = safeText(title);
+  const idx = t.lastIndexOf(' - ');
+  if (idx > 15) return t.slice(0, idx).trim();
+  return t;
+}
+
 function pickFirstLink(entry) {
   if (!entry) return '';
   const link = entry.link;
@@ -70,7 +92,7 @@ function pickFirstLink(entry) {
   return '';
 }
 
-function parseFeedItems(xml, source) {
+function parseFeedItems(xml, source, kind = 'ai-news') {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_'
@@ -89,11 +111,13 @@ function parseFeedItems(xml, source) {
     const arr = Array.isArray(rssItems) ? rssItems : [rssItems];
     return arr
       .map((it) => {
-        const title = safeText(it?.title);
+        const titleRaw = safeText(it?.title);
+        const title = stripGoogleNewsSuffix(titleRaw);
         const link = safeText(it?.link);
         const pub = safeText(it?.pubDate) || safeText(it?.published) || safeText(it?.updated);
         if (!title) return null;
-        return { kind: 'ai-news', source, title, link, publishedAt: pub || null };
+        if (!looksRussian(title)) return null;
+        return { kind, source, title, link, publishedAt: pub || null };
       })
       .filter(Boolean);
   }
@@ -104,11 +128,13 @@ function parseFeedItems(xml, source) {
     const arr = Array.isArray(atomEntries) ? atomEntries : [atomEntries];
     return arr
       .map((e) => {
-        const title = safeText(e?.title);
+        const titleRaw = safeText(e?.title);
+        const title = stripGoogleNewsSuffix(titleRaw);
         const link = pickFirstLink(e);
         const pub = safeText(e?.published) || safeText(e?.updated);
         if (!title) return null;
-        return { kind: 'ai-news', source, title, link, publishedAt: pub || null };
+        if (!looksRussian(title)) return null;
+        return { kind, source, title, link, publishedAt: pub || null };
       })
       .filter(Boolean);
   }
@@ -126,7 +152,7 @@ async function fetchAiFeed(feed) {
     });
     if (!resp.ok) return [];
     const xml = await resp.text();
-    return parseFeedItems(xml, feed.source);
+    return parseFeedItems(xml, feed.source, feed.kind || 'ai-news');
   } catch (_) {
     return [];
   } finally {
@@ -134,7 +160,7 @@ async function fetchAiFeed(feed) {
   }
 }
 
-async function getAiNewsCached(maxItems = 6) {
+async function getAiNewsCached(maxItems = 8) {
   const ttlMs = 10 * 60 * 1000;
   const now = Date.now();
   if (aiCache.updatedAtMs && (now - aiCache.updatedAtMs) < ttlMs && Array.isArray(aiCache.items)) {
@@ -144,16 +170,18 @@ async function getAiNewsCached(maxItems = 6) {
   const results = await Promise.all(AI_FEEDS.map(fetchAiFeed));
   const merged = results.flat();
 
-  // Уберём дубликаты по title
+  // Уберём дубликаты по title (и снова проверим русский)
   const seen = new Set();
   const deduped = [];
   for (const it of merged) {
-    const key = safeText(it.title).toLowerCase();
+    const title = stripGoogleNewsSuffix(it.title);
+    if (!looksRussian(title)) continue;
+    const key = safeText(title).toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
     deduped.push({
       ...it,
-      title: safeText(it.title).slice(0, 140)
+      title: safeText(title).slice(0, 140)
     });
     if (deduped.length >= maxItems) break;
   }
@@ -260,9 +288,9 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // 2) новости по ИИ (кешируются)
+    // 2) новости по ИИ (на русском, кешируются)
     try {
-      const aiNews = await getAiNewsCached(6);
+      const aiNews = await getAiNewsCached(10);
       if (aiNews.length) items.push(...aiNews);
     } catch (_) {}
 
