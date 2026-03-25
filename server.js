@@ -10,6 +10,7 @@ const adminRoutes = require('./routes/admin');
 const chartsRoutes = require('./routes/charts');
 const playlistsRoutes = require('./routes/playlists');
 const usersRoutes = require('./routes/users');
+const announcementsRoutes = require('./routes/announcements');
 
 connectDB();
 initGridFS();
@@ -76,6 +77,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/charts', chartsRoutes);
 app.use('/api/playlists', playlistsRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/announcements', announcementsRoutes);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
