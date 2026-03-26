@@ -601,7 +601,8 @@ router.get('/host-settings', async (req, res) => {
 // Серверный нейро-TTS (Edge voices), чтобы не использовать механическую browser speech.
 router.get('/tts', async (req, res) => {
   try {
-    const { tts } = require('edge-tts');
+    // edge-tts — ESM («type»: «module»); require() даёт Unexpected token 'export'
+    const { tts } = await import('edge-tts/out/index.js');
     const raw = String(req.query.text || '').trim();
     const text = raw.slice(0, 420);
     if (!text) return res.status(400).json({ message: 'text required' });
