@@ -598,15 +598,23 @@ router.get('/host-settings', async (req, res) => {
 });
 
 // GET /api/announcements/tts?text=...
-// Серверный нейро-TTS (Edge voices), чтобы не использовать механическую browser speech.
+// Edge Read Aloud через msedge-tts (актуальный Sec-MS-GEC; старый edge-tts даёт 403).
+function escapeSsmlPlainText(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 router.get('/tts', async (req, res) => {
   try {
-    // edge-tts — ESM («type»: «module»); require() даёт Unexpected token 'export'
-    const { tts } = await import('edge-tts/out/index.js');
+    const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
     const raw = String(req.query.text || '').trim();
     const text = raw.slice(0, 420);
     if (!text) return res.status(400).json({ message: 'text required' });
 
+    const safeText = escapeSsmlPlainText(text);
     const requestedVoice = String(req.query.voice || '').trim();
     const voiceCandidates = [
       requestedVoice,
@@ -618,19 +626,31 @@ router.get('/tts', async (req, res) => {
     let lastErr = null;
 
     for (const voice of voiceCandidates) {
+      const client = new MsEdgeTTS();
       try {
-        const mp3 = await tts(text, {
-          voice,
+        await client.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+        const { audioStream } = await client.toStream(safeText, {
           rate,
-          volume: '+0%',
-          pitch: '-2Hz'
+          pitch: '-2Hz',
+          volume: 100
         });
+        const chunks = [];
+        // eslint-disable-next-line no-restricted-syntax
+        for await (const chunk of audioStream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const buf = Buffer.concat(chunks);
+        if (!buf.length) throw new Error('empty audio');
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('X-TTS-Voice', voice);
-        return res.send(Buffer.from(mp3));
+        return res.send(buf);
       } catch (e) {
         lastErr = e;
+      } finally {
+        try {
+          client.close();
+        } catch (_) {}
       }
     }
 
