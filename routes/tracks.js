@@ -243,6 +243,70 @@ router.get('/audio/:fileId', protectStream, async (req, res) => {
   }
 });
 
+// GET /api/tracks/audio-public/:fileId — публичный стрим для гостевого радио (только approved)
+router.get('/audio-public/:fileId', async (req, res) => {
+  try {
+    const { gridfsBucket } = getGridFS();
+    const _id = new mongoose.Types.ObjectId(req.params.fileId);
+
+    const track = await Track.findOne({ audioFileId: String(req.params.fileId), status: 'approved' })
+      .select('_id')
+      .lean();
+    if (!track) return res.status(404).json({ message: 'Файл не найден' });
+
+    const cursor = gridfsBucket.find({ _id });
+    const file = await cursor.next();
+    if (!file) return res.status(404).json({ message: 'Файл не найден' });
+    const fileSize = Number(file.length) || 0;
+    const contentType = file.contentType || 'audio/mpeg';
+    const range = req.headers.range;
+
+    res.set('Accept-Ranges', 'bytes');
+    res.set('Content-Type', contentType);
+
+    if (range && fileSize > 0) {
+      const match = String(range).match(/bytes=(\d*)-(\d*)/);
+      if (!match) {
+        res.set('Content-Range', `bytes */${fileSize}`);
+        return res.status(416).end();
+      }
+
+      let start = match[1] ? Number(match[1]) : 0;
+      let end = match[2] ? Number(match[2]) : fileSize - 1;
+
+      if (!Number.isFinite(start) || start < 0) start = 0;
+      if (!Number.isFinite(end) || end >= fileSize) end = fileSize - 1;
+      if (start > end || start >= fileSize) {
+        res.set('Content-Range', `bytes */${fileSize}`);
+        return res.status(416).end();
+      }
+
+      const chunkSize = end - start + 1;
+      res.status(206);
+      res.set('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+      res.set('Content-Length', String(chunkSize));
+
+      const stream = gridfsBucket.openDownloadStream(_id, {
+        start,
+        end: end + 1
+      });
+      stream.on('error', () => {
+        if (!res.headersSent) res.status(500).end();
+      });
+      return stream.pipe(res);
+    }
+
+    if (fileSize > 0) res.set('Content-Length', String(fileSize));
+    const stream = gridfsBucket.openDownloadStream(_id);
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).end();
+    });
+    return stream.pipe(res);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // GET /api/tracks — только одобренные
 router.get('/', async (req, res) => {
   try {
