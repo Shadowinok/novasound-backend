@@ -2,6 +2,7 @@ const express = require('express');
 const Track = require('../models/Track');
 const Announcement = require('../models/Announcement');
 const RadioHostSettings = require('../models/RadioHostSettings');
+const HostLine = require('../models/HostLine');
 const { XMLParser } = require('fast-xml-parser');
 
 const router = express.Router();
@@ -93,6 +94,288 @@ const aiCache = {
   updatedAtMs: 0,
   items: []
 };
+const hostLinesRefreshState = { running: false, lastRefreshAtMs: 0 };
+
+function normalizeLineText(v) {
+  return safeText(v).replace(/[«»"“”]/g, '"').replace(/\s+/g, ' ').trim();
+}
+
+function simpleHash(text) {
+  const s = normalizeLineText(text).toLowerCase();
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return String(h >>> 0);
+}
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = arr[i];
+    arr[i] = arr[j];
+    arr[j] = t;
+  }
+  return arr;
+}
+
+const HOST_LINE_BASE_SEEDS = {
+  joke: [
+    'Если заголовок громкий, проверяем его ушами и здравым смыслом.',
+    'Новости иногда звучат как трейлер — красиво, но ждём релиз фактов.',
+    'Лента сегодня бодрая, будто выпила двойной эспрессо.',
+    'Заголовок с характером. Берём в эфир, но с лёгкой иронией.',
+    'Инфо-поток бодрый, мы держим музыкальный баланс.'
+  ],
+  fact: [
+    'Факт дня: кнопка "ещё один трек и спать" почти никогда не работает.',
+    'Наблюдение: лучший плейлист обычно длиннее, чем планировалось.',
+    'Интересный факт: любимый трек всегда заканчивается слишком быстро.',
+    'Маленькое наблюдение: хороший ритм лечит от лишней суеты.',
+    'Факт эфира: настроение часто меняется за один удачный припев.'
+  ],
+  'news-bridge': [
+    'Дальше по ленте: "{title}".',
+    'Ещё один заголовок в эфир: "{title}".',
+    'Переключаемся на следующую тему: "{title}".',
+    'Из свежего также: "{title}".',
+    'Следующий инфо-штрих: "{title}".'
+  ],
+  'news-outro': [
+    'На этом с новостями всё, возвращаемся к музыке.',
+    'Новостной блок завершён, продолжаем музыкальный эфир.',
+    'Инфо-часть закрыли, дальше только музыка и вайб.',
+    'Новости поставили на паузу, продолжаем по музыкальному курсу.',
+    'С новостями разобрались, теперь снова в ритм эфира.'
+  ],
+  'track-next': [
+    'Дальше в эфире {track}.',
+    'На очереди {track}.',
+    'Следом прозвучит {track}.',
+    'Чуть дальше по плейлисту: {track}.',
+    'После этого трека пойдём к {track}.'
+  ],
+  'track-current': [
+    'Сейчас в эфире {track}.',
+    'Прямо сейчас играет {track}.',
+    'В данный момент на волне: {track}.',
+    'В эфире сейчас звучит {track}.',
+    'Именно сейчас слушаем {track}.'
+  ]
+};
+const HOST_LINE_TYPE_PROFILE = {
+  joke: { mood: 'playful', cue: 'smile', rateMin: 10, rateMax: 18 },
+  fact: { mood: 'warm', cue: 'none', rateMin: 8, rateMax: 14 },
+  'news-bridge': { mood: 'neutral', cue: 'none', rateMin: 7, rateMax: 13 },
+  'news-outro': { mood: 'warm', cue: 'smile', rateMin: 8, rateMax: 14 },
+  'track-next': { mood: 'energetic', cue: 'none', rateMin: 10, rateMax: 18 },
+  'track-current': { mood: 'warm', cue: 'none', rateMin: 8, rateMax: 14 }
+};
+
+function buildCombinatorLines(partsA = [], partsB = [], partsC = [], opts = {}) {
+  const out = [];
+  const max = Math.max(1, Number(opts.max) || 300);
+  for (const a of partsA) {
+    for (const b of partsB) {
+      for (const c of partsC) {
+        const line = normalizeLineText(`${a} ${b} ${c}`);
+        if (line) out.push(line);
+        if (out.length >= max) return out;
+      }
+    }
+  }
+  return out;
+}
+
+function buildGeneratedHostLineSeeds() {
+  const jokeA = ['Заголовок сегодня', 'Лента сегодня', 'Инфо-поток', 'Новости в эфире', 'Редакторы ленты'];
+  const jokeB = ['с характером', 'с амбициями', 'в боевом режиме', 'на максимальной подаче', 'без режима сна'];
+  const jokeC = [
+    'а мы держим спокойный музыкальный курс.',
+    'но проверяем факты без лишнего шума.',
+    'и всё равно остаёмся в приятном вайбе.',
+    'так что добавляем иронию и едем дальше.',
+    'а мы оставляем драму заголовкам, а не эфиру.'
+  ];
+
+  const factA = ['Факт эфира:', 'Наблюдение дня:', 'Короткий факт:', 'Маленькое наблюдение:', 'Лайв-факт:'];
+  const factB = [
+    'хороший трек',
+    'вовремя включённая музыка',
+    'удачный припев',
+    'спокойный бит',
+    'неожиданный переход'
+  ];
+  const factC = [
+    'часто работает лучше длинных объяснений.',
+    'быстро возвращает настроение в норму.',
+    'решает больше, чем кажется на старте.',
+    'обычно спасает вечер от лишней суеты.',
+    'всегда слышится короче, чем хочется.'
+  ];
+
+  const bridgeA = ['Дальше по ленте', 'Следующий заголовок', 'Из свежего также', 'Переключаемся на тему', 'Коротко о следующем'];
+  const bridgeB = ['в эфире', 'сейчас в блоке', 'без длинного вступления', 'короткой строкой', 'по фактам'];
+  const bridgeC = [
+    ': "{title}".',
+    ' — "{title}".',
+    ': вот так — "{title}".',
+    ': фиксируем — "{title}".',
+    ': звучит так — "{title}".'
+  ];
+
+  const outroA = ['Новостной блок завершили.', 'На этом новости закрыли.', 'Инфо-часть закончена.', 'С новостями всё.', 'Дайджест завершён.'];
+  const outroB = ['Возвращаемся', 'Переходим', 'Возвращаем курс', 'Снова идём', 'Продолжаем движение'];
+  const outroC = [
+    'к музыке и хорошему ритму.',
+    'в музыкальный поток эфира.',
+    'к трекам и приятному темпу.',
+    'в основной музыкальный эфир.',
+    'по нашему музыкальному маршруту.'
+  ];
+
+  const nextA = ['Дальше в эфире', 'На очереди', 'Следом прозвучит', 'Чуть позже включим', 'После этого трека идём к'];
+  const nextB = ['{track}', '{track}', '{track}', '{track}', '{track}'];
+  const nextC = ['.', '.', '.', '.', '.'];
+
+  const currentA = ['Сейчас в эфире', 'Прямо сейчас играет', 'В данный момент звучит', 'На волне сейчас', 'Именно сейчас слушаем'];
+  const currentB = ['{track}', '{track}', '{track}', '{track}', '{track}'];
+  const currentC = ['.', '.', '.', '.', '.'];
+
+  return {
+    joke: buildCombinatorLines(jokeA, jokeB, jokeC, { max: 220 }),
+    fact: buildCombinatorLines(factA, factB, factC, { max: 260 }),
+    'news-bridge': buildCombinatorLines(bridgeA, bridgeB, bridgeC, { max: 220 }),
+    'news-outro': buildCombinatorLines(outroA, outroB, outroC, { max: 220 }),
+    'track-next': buildCombinatorLines(nextA, nextB, nextC, { max: 200 }),
+    'track-current': buildCombinatorLines(currentA, currentB, currentC, { max: 200 })
+  };
+}
+
+function parseRemoteHostLinesPayload(rawText) {
+  try {
+    const parsed = JSON.parse(rawText);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((x) => ({
+        type: String(x?.type || '').trim(),
+        text: normalizeLineText(x?.text || ''),
+        source: 'remote',
+        mood: String(x?.mood || '').trim(),
+        cue: String(x?.cue || '').trim(),
+        rateMin: Number(x?.rateMin),
+        rateMax: Number(x?.rateMax)
+      }))
+      .filter((x) => x.type && x.text);
+  } catch (_) {
+    return [];
+  }
+}
+
+async function refreshHostLinesIfDue() {
+  const now = Date.now();
+  const refreshDaysRaw = Number(process.env.HOST_LINES_REFRESH_DAYS);
+  const refreshDays = Number.isFinite(refreshDaysRaw) && refreshDaysRaw >= 30 ? refreshDaysRaw : 30; // можно поставить 180
+  const ttlMs = refreshDays * 24 * 60 * 60 * 1000;
+  if (hostLinesRefreshState.running) return;
+  if (hostLinesRefreshState.lastRefreshAtMs && (now - hostLinesRefreshState.lastRefreshAtMs) < ttlMs) return;
+
+  hostLinesRefreshState.running = true;
+  try {
+    const seedOps = [];
+    const generated = buildGeneratedHostLineSeeds();
+    const mergedSeeds = {
+      ...generated,
+      ...Object.fromEntries(
+        Object.entries(HOST_LINE_BASE_SEEDS).map(([type, lines]) => [
+          type,
+          [...(generated[type] || []), ...(Array.isArray(lines) ? lines : [])]
+        ])
+      )
+    };
+    Object.entries(mergedSeeds).forEach(([type, lines]) => {
+      lines.forEach((text) => {
+        const clean = normalizeLineText(text);
+        if (!clean) return;
+        seedOps.push({
+          updateOne: {
+            filter: { type, hash: simpleHash(clean) },
+            update: {
+              $setOnInsert: {
+                type,
+                text: clean,
+                hash: simpleHash(clean),
+                source: 'seed',
+                mood: HOST_LINE_TYPE_PROFILE[type]?.mood || 'neutral',
+                cue: HOST_LINE_TYPE_PROFILE[type]?.cue || 'none',
+                rateMin: HOST_LINE_TYPE_PROFILE[type]?.rateMin || 6,
+                rateMax: HOST_LINE_TYPE_PROFILE[type]?.rateMax || 14,
+                safeForKids: true,
+                archived: false,
+                usedCount: 0,
+                maxUses: 36
+              }
+            },
+            upsert: true
+          }
+        });
+      });
+    });
+    if (seedOps.length) await HostLine.bulkWrite(seedOps, { ordered: false });
+
+    const remoteUrls = String(process.env.HOST_LINES_REMOTE_URLS || '')
+      .split(',')
+      .map((u) => safeText(u))
+      .filter(Boolean);
+
+    for (const url of remoteUrls) {
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        const text = await resp.text();
+        const remoteRows = parseRemoteHostLinesPayload(text);
+        if (!remoteRows.length) continue;
+        const ops = remoteRows.map((row) => ({
+          updateOne: {
+            filter: { type: row.type, hash: simpleHash(row.text) },
+            update: {
+              $setOnInsert: {
+                type: row.type,
+                text: row.text,
+                hash: simpleHash(row.text),
+                source: 'remote',
+                mood: ['neutral', 'warm', 'playful', 'serious', 'energetic'].includes(row.mood)
+                  ? row.mood
+                  : (HOST_LINE_TYPE_PROFILE[row.type]?.mood || 'neutral'),
+                cue: ['none', 'smile', 'serious'].includes(row.cue)
+                  ? row.cue
+                  : (HOST_LINE_TYPE_PROFILE[row.type]?.cue || 'none'),
+                rateMin: Number.isFinite(row.rateMin) ? Math.max(0, Math.min(30, row.rateMin)) : (HOST_LINE_TYPE_PROFILE[row.type]?.rateMin || 6),
+                rateMax: Number.isFinite(row.rateMax) ? Math.max(0, Math.min(35, row.rateMax)) : (HOST_LINE_TYPE_PROFILE[row.type]?.rateMax || 14),
+                safeForKids: true,
+                archived: false,
+                usedCount: 0,
+                maxUses: 36
+              }
+            },
+            upsert: true
+          }
+        }));
+        await HostLine.bulkWrite(ops, { ordered: false });
+      } catch (_) {}
+    }
+
+    // Автоархив "выгоревших" реплик, которые уже слишком часто использовались.
+    await HostLine.updateMany(
+      { archived: false, $expr: { $gte: ['$usedCount', '$maxUses'] } },
+      { $set: { archived: true } }
+    );
+
+    hostLinesRefreshState.lastRefreshAtMs = now;
+  } finally {
+    hostLinesRefreshState.running = false;
+  }
+}
 
 function safeText(v) {
   if (v === null || v === undefined) return '';
@@ -674,6 +957,57 @@ router.get('/', async (req, res) => {
     res.json({ items, generatedAt: new Date().toISOString() });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// Пул реплик ведущего с анти-повторами и авто-ротацией.
+router.get('/host-lines', async (req, res) => {
+  try {
+    await refreshHostLinesIfDue();
+    const allowedTypes = new Set(['joke', 'fact', 'news-bridge', 'news-outro', 'track-next', 'track-current']);
+    const reqTypes = String(req.query.types || 'joke,fact,news-bridge,news-outro,track-next,track-current')
+      .split(',')
+      .map((x) => safeText(x))
+      .filter((x) => allowedTypes.has(x));
+    const types = reqTypes.length ? reqTypes : ['joke', 'fact', 'news-bridge', 'news-outro', 'track-next', 'track-current'];
+    const limitPerTypeRaw = Number(req.query.limitPerType);
+    const limitPerType = Number.isFinite(limitPerTypeRaw)
+      ? Math.max(3, Math.min(limitPerTypeRaw, 120))
+      : 40;
+
+    const out = {};
+    for (const type of types) {
+      const candidates = await HostLine.find({ type, archived: false })
+        .sort({ lastUsedAt: 1, usedCount: 1, createdAt: 1 })
+        .limit(Math.max(limitPerType * 3, 30))
+        .lean();
+
+      const picked = shuffleInPlace(candidates.slice()).slice(0, limitPerType);
+      out[type] = picked.map((x) => ({
+        text: x.text,
+        mood: x.mood || 'neutral',
+        cue: x.cue || 'none',
+        rateMin: Number.isFinite(Number(x.rateMin)) ? Number(x.rateMin) : 6,
+        rateMax: Number.isFinite(Number(x.rateMax)) ? Number(x.rateMax) : 14
+      }));
+      const ids = picked.map((x) => x._id).filter(Boolean);
+      if (ids.length) {
+        await HostLine.updateMany(
+          { _id: { $in: ids } },
+          { $inc: { usedCount: 1 }, $set: { lastUsedAt: new Date() } }
+        );
+      }
+    }
+
+    // Второй проход архивации после выдачи.
+    await HostLine.updateMany(
+      { archived: false, $expr: { $gte: ['$usedCount', '$maxUses'] } },
+      { $set: { archived: true } }
+    );
+
+    res.json({ items: out, refreshedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка выдачи реплик ведущего' });
   }
 });
 
