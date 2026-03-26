@@ -174,6 +174,36 @@ function isPoliticalOrWarJunk(title) {
   return bad.some((k) => t.includes(k));
 }
 
+function isUnsafeSensitiveJunk(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return true;
+  const bad = [
+    // сексуализированное насилие / эксплуатация / несовершеннолетние
+    'порн', 'порно', 'порнограф', 'эрот', 'секс', 'сексуал', 'интим', 'adult', '18+',
+    'детск', 'несовершеннолет', 'педофил', 'эксплуатац',
+    'child abuse', 'child porn', 'child pornography', 'csam',
+    // тяжёлое насилие и саморазрушение
+    'изнасил', 'насили', 'убийств', 'казн', 'суицид', 'самоубий', 'жесток', 'расчлен',
+    // запрещённые вещества/криминал
+    'наркот', 'героин', 'кокаин', 'амфетамин', 'метадон',
+    'пропаганд', 'террор', 'взрыв'
+  ];
+  return bad.some((k) => t.includes(k));
+}
+
+function isNonEntertainmentJunk(title) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return true;
+  // Для NovaSound: выкидываем "отраслевую/гос/B2B" повестку, которая не подходит развлекательному эфиру.
+  const bad = [
+    'отраслев', 'энергетик',
+    'госкорп', 'госкомпан', 'министер', 'ведомств', 'чиновник', 'регулятор',
+    'корпоративн', 'предприят', 'промышлен', 'инфраструктур',
+    'b2b', 'enterprise', 'госуслуг', 'тендер', 'закупк'
+  ];
+  return bad.some((k) => t.includes(k));
+}
+
 function containsMusicKeywords(title) {
   const t = safeText(title).toLowerCase();
   if (!t) return false;
@@ -187,13 +217,17 @@ function containsMusicKeywords(title) {
 function containsCreativeKeywords(title) {
   const t = safeText(title).toLowerCase();
   if (!t) return false;
-  const good = [
-    // Для креатива: важно, чтобы это выглядело как медиа/визуал/озвучка.
-    // Если это не “визуальный”/“медийный” креатив — всё равно отфильтруем на unwanted-темах.
-    'нейросет', 'генерац', 'изображ', 'картин', 'обложк', 'дизайн', 'постер', 'арт',
-    'видео', 'ролик', 'монтаж', 'озвучк', 'диктор', '3d', 'рендер', 'анимац'
+  const aiMarkers = [
+    'ии', 'искусствен', 'интеллект', 'нейросет', 'нейромодел', 'ai'
   ];
-  return good.some((k) => t.includes(k));
+  const mediaCreativeMarkers = [
+    'изображ', 'картин', 'обложк', 'дизайн', 'постер', 'арт',
+    'видео', 'ролик', 'монтаж', 'озвучк', 'диктор', '3d', 'рендер', 'анимац',
+    'музык', 'трек', 'саунд', 'аудио', 'подкаст'
+  ];
+  const hasAi = aiMarkers.some((k) => t.includes(k));
+  const hasCreative = mediaCreativeMarkers.some((k) => t.includes(k));
+  return hasAi && hasCreative;
 }
 
 function isUnwantedAiTopic(title, kind) {
@@ -300,23 +334,90 @@ function containsReleasesKeywords(title) {
   return hasRelease && hasDomain;
 }
 
+// Явная матрица для NovaSound: что разрешаем/запрещаем в каждой категории.
+const TITLE_GROUPS = {
+  ai: ['ии', 'искусствен', 'интеллект', 'нейросет', 'нейромодел', 'ai', 'llm'],
+  musicAudio: [
+    'музык', 'музыка', 'песн', 'трек', 'аудио', 'звук', 'голос', 'подкаст', 'саунд',
+    'аранжир', 'композ', 'сведение', 'master'
+  ],
+  creativeMedia: [
+    'видео', 'ролик', 'монтаж', 'озвучк', 'диктор', 'изображ', 'картин', 'обложк',
+    'дизайн', 'постер', 'арт', '3d', 'рендер', 'анимац', 'контент', 'креатив'
+  ],
+  cinemaMedia: ['кино', 'фильм', 'сериал', 'трейлер', 'премьера', 'режисс', 'студия', 'съёмк', 'съемк'],
+  gaming: ['игр', 'игра', 'геймплей', 'steam', 'консоль', 'vr', 'патч'],
+  creatorTools: ['редактор', 'генерац', 'инструмент', 'платформ', 'приложен', 'сервис', 'sdk', 'api', 'интеграц'],
+  release: ['релиз', 'выйдет', 'выйдут', 'выходит', 'выпуск', 'анонс', 'апдейт', 'обновлен', 'верси', 'патч', 'демо'],
+  techProduct: ['алгоритм', 'модель', 'технолог', 'платформ', 'движок', 'софт', 'прилож', 'сервис'],
+  robotics: ['робот', 'робото', 'робототехн', 'автоматизац', 'мехатрон', 'манипулятор'],
+
+  denyPoliticsWarGov: [
+    'войн', 'фронт', 'атака', 'обстрел', 'армия', 'минобороны', 'военн', 'дрон', 'беспилот',
+    'правительств', 'президент', 'губернатор', 'депутат', 'партия', 'выбор', 'митинг',
+    'санкц', 'закон', 'суд', 'прокуратур', 'полици', 'фсб', 'мвд',
+    'украин', 'киев', 'донбасс', 'нато', 'израил', 'палестин', 'иран', 'сирия'
+  ],
+  denyRegionalAdmin: ['област', 'крае', 'республик', 'администрац', 'мэр', 'дум', 'регион'],
+  denyAdultSensitive: [
+    'порн', 'порно', 'порнограф', 'эрот', 'секс', 'сексуал', 'интим', 'adult', '18+',
+    'детск', 'несовершеннолет', 'педофил', 'эксплуатац', 'child porn', 'child pornography', 'csam'
+  ],
+  denyViolenceCrime: ['изнасил', 'насили', 'убийств', 'казн', 'суицид', 'самоубий', 'жесток', 'расчлен', 'террор', 'взрыв'],
+  denyDrugs: ['наркот', 'героин', 'кокаин', 'амфетамин', 'метадон'],
+  denyB2BGovIndustry: [
+    'отраслев', 'энергетик', 'госкорп', 'госкомпан', 'министер', 'ведомств', 'чиновник', 'регулятор',
+    'корпоративн', 'предприят', 'промышлен', 'инфраструктур', 'enterprise', 'b2b', 'тендер', 'закупк'
+  ]
+};
+
+function hasGroupHit(titleLower, groupName) {
+  const words = TITLE_GROUPS[groupName] || [];
+  return words.some((w) => titleLower.includes(w));
+}
+
+function countGroupHits(titleLower, groupNames = []) {
+  return groupNames.reduce((acc, g) => acc + (hasGroupHit(titleLower, g) ? 1 : 0), 0);
+}
+
+function passesKindMatrix(title, kind) {
+  const t = safeText(title).toLowerCase();
+  if (!t) return false;
+
+  const denyGroups = [
+    'denyPoliticsWarGov',
+    'denyRegionalAdmin',
+    'denyAdultSensitive',
+    'denyViolenceCrime',
+    'denyDrugs',
+    'denyB2BGovIndustry'
+  ];
+  if (denyGroups.some((g) => hasGroupHit(t, g))) return false;
+
+  const rules = {
+    'ai-music-news': { groups: ['ai', 'musicAudio', 'creatorTools', 'release'], minHits: 2, require: ['ai', 'musicAudio'] },
+    'ai-creative-news': { groups: ['ai', 'creativeMedia', 'creatorTools', 'musicAudio', 'release'], minHits: 2, require: ['ai', 'creativeMedia'] },
+    'gaming-news': { groups: ['gaming', 'release', 'creativeMedia', 'techProduct'], minHits: 1, require: [] },
+    'film-news': { groups: ['cinemaMedia', 'release', 'creativeMedia'], minHits: 1, require: [] },
+    'industry-news': { groups: ['techProduct', 'creatorTools', 'creativeMedia', 'musicAudio', 'cinemaMedia', 'gaming'], minHits: 1, require: [] },
+    'software-news': { groups: ['techProduct', 'creatorTools', 'release', 'creativeMedia', 'musicAudio'], minHits: 1, require: [] },
+    'robots-news': { groups: ['robotics', 'techProduct'], minHits: 1, require: [] },
+    'releases-news': { groups: ['release', 'techProduct', 'creativeMedia', 'musicAudio', 'cinemaMedia', 'gaming'], minHits: 2, require: ['release'] }
+  };
+
+  const rule = rules[kind] || { groups: ['musicAudio', 'creativeMedia'], minHits: 1, require: [] };
+  if (rule.require.some((g) => !hasGroupHit(t, g))) return false;
+  return countGroupHits(t, rule.groups) >= rule.minHits;
+}
+
 function acceptAiTitle(title, kind) {
   const clean = stripGoogleNewsSuffix(title);
   if (!looksRussian(clean)) return false;
   if (isPoliticalOrWarJunk(clean)) return false;
+  if (isUnsafeSensitiveJunk(clean)) return false;
+  if (isNonEntertainmentJunk(clean)) return false;
   if (isUnwantedAiTopic(clean, kind)) return false;
-  // Разнообразим: 
-  // - ai-music-news: только музыка/аудио
-  // - ai-creative-news: только творчество (обложки, изображения, видео, озвучка и т.п.)
-  if (kind === 'ai-music-news') return containsMusicKeywords(clean);
-  if (kind === 'ai-creative-news') return containsCreativeKeywords(clean);
-  if (kind === 'gaming-news') return containsGameKeywords(clean);
-  if (kind === 'film-news') return containsFilmKeywords(clean);
-  if (kind === 'industry-news') return containsIndustryKeywords(clean);
-  if (kind === 'software-news') return containsSoftwareKeywords(clean);
-  if (kind === 'robots-news') return containsRobotsKeywords(clean);
-  if (kind === 'releases-news') return containsReleasesKeywords(clean);
-  return containsMusicKeywords(clean);
+  return passesKindMatrix(clean, kind);
 }
 
 function pickFirstLink(entry) {
