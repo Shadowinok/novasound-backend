@@ -11,6 +11,7 @@ const chartsRoutes = require('./routes/charts');
 const playlistsRoutes = require('./routes/playlists');
 const usersRoutes = require('./routes/users');
 const announcementsRoutes = require('./routes/announcements');
+const campaignsRoutes = require('./routes/campaigns');
 
 connectDB();
 initGridFS();
@@ -78,6 +79,7 @@ app.use('/api/charts', chartsRoutes);
 app.use('/api/playlists', playlistsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/announcements', announcementsRoutes);
+app.use('/api/campaigns', campaignsRoutes);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

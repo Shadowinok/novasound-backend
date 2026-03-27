@@ -55,6 +55,49 @@ function getMskHour() {
   }
 }
 
+function getMskDateParts(now = new Date()) {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Moscow',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      hour12: false
+    });
+    const parts = fmt.formatToParts(now);
+    const pick = (type) => parts.find((p) => p.type === type)?.value || '';
+    const year = pick('year');
+    const month = pick('month');
+    const day = pick('day');
+    const hourNum = Number(pick('hour'));
+    return {
+      dayKey: `${year}-${month}-${day}`,
+      hour: Number.isFinite(hourNum) ? hourNum : getMskHour()
+    };
+  } catch (_) {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return { dayKey: `${y}-${m}-${day}`, hour: getMskHour() };
+  }
+}
+
+function resolveTimeBlockByMskHour(mskHour) {
+  // Блоки строго по MSK, согласованные интервалы.
+  if (mskHour >= 5 && mskHour < 12) {
+    return { id: 'morning', fromHour: 5, toHour: 12, kind: 'thematic', theme: 'chill' };
+  }
+  if (mskHour >= 12 && mskHour < 19) {
+    return { id: 'day', fromHour: 12, toHour: 19, kind: 'base', theme: 'mixed' };
+  }
+  if (mskHour >= 19 && mskHour < 23) {
+    return { id: 'evening', fromHour: 19, toHour: 23, kind: 'thematic', theme: 'energetic' };
+  }
+  return { id: 'night', fromHour: 23, toHour: 5, kind: 'thematic', theme: 'night' };
+}
+
 function pickDjEpisodeAuto(episodeKey) {
   const mskHour = getMskHour();
   // eslint-disable-next-line no-bitwise
@@ -375,14 +418,19 @@ router.get('/radio/now', async (req, res) => {
       duration: Number.isFinite(Number(t.duration)) && Number(t.duration) > 0 ? Number(t.duration) : 180
     }));
 
-    // Делаем порядок очереди "рандомным", но детерминированным для всех:
-    // сид зависит от текущего временного окна (чтобы эфир обновлялся не каждую секунду).
-    const nowSec = Math.floor(Date.now() / 1000);
-    const shuffleWindowSec = Number.isFinite(Number(req.query.shuffleWindowSec))
-      ? Math.max(60, Number(req.query.shuffleWindowSec))
-      : 60 * 30; // 30 минут
-    const windowKey = Math.floor(nowSec / shuffleWindowSec);
-    const seedBase = windowKey * 1000003;
+    // Делаем порядок очереди детерминированным:
+    // - для base-блока (day) — на сутки;
+    // - для тематических блоков — отдельный полный список на конкретный блок/день.
+    const now = new Date();
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const msk = getMskDateParts(now);
+    const timeBlock = resolveTimeBlockByMskHour(msk.hour);
+    const blockKey = `${msk.dayKey}:${timeBlock.id}`;
+    const daySeed = Number(msk.dayKey.replace(/-/g, '')) || 1;
+    const blockHash = Array.from(blockKey).reduce((acc, ch) => ((acc * 31) + ch.charCodeAt(0)) >>> 0, 7);
+    const seedBase = timeBlock.kind === 'base'
+      ? (daySeed * 1000003)
+      : (blockHash * 1000003);
     const settings = await RadioHostSettings.findOne({ key: 'main' }).lean();
     const playlistMode = settings?.radioPlaylistMode === 'dj' ? 'dj' : 'random';
     const configuredTheme = String(settings?.djTheme || 'auto');
@@ -394,7 +442,23 @@ router.get('/radio/now', async (req, res) => {
     let djEpisode = null;
     if (playlistMode === 'dj') {
       if (configuredTheme === 'auto') {
+        // Для авто-темы используем приоритет временного блока.
         const ep = pickDjEpisodeAuto(episodeKey);
+        if (timeBlock.id === 'morning') {
+          ep.moodType = 'morning_chill';
+          ep.effectiveTheme = 'chill';
+        } else if (timeBlock.id === 'evening') {
+          ep.moodType = 'custom';
+          ep.effectiveTheme = 'energetic';
+          ep.tag = 'вечерний разгон';
+        } else if (timeBlock.id === 'night') {
+          ep.moodType = 'night_chill';
+          ep.effectiveTheme = 'night';
+        } else {
+          ep.moodType = 'mixed';
+          ep.effectiveTheme = 'mixed';
+          ep.tag = 'дневной эфир';
+        }
         effectiveTheme = ep.effectiveTheme;
         djEpisode = {
           id: ep.id,
@@ -461,6 +525,12 @@ router.get('/radio/now', async (req, res) => {
       queue: rotateQueue,
       queueIndex: 0,
       nowOffsetSec,
+      timeBlock: {
+        id: timeBlock.id,
+        kind: timeBlock.kind,
+        fromHour: timeBlock.fromHour,
+        toHour: timeBlock.toHour
+      },
       radioPlaylistMode: playlistMode,
       djTheme: effectiveTheme,
       djEpisode,

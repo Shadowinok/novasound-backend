@@ -7,6 +7,8 @@ const ListenLog = require('../models/ListenLog');
 const TrackReport = require('../models/TrackReport');
 const Announcement = require('../models/Announcement');
 const RadioHostSettings = require('../models/RadioHostSettings');
+const Campaign = require('../models/Campaign');
+const CampaignSubmission = require('../models/CampaignSubmission');
 const { getGridFS } = require('../config/gridfs');
 const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
@@ -678,6 +680,206 @@ router.put('/radio-host-settings', [
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка сохранения настроек ведущего' });
+  }
+});
+
+// ===== Кампании (конкурсы/активности) =====
+const campaignTypeList = ['track_week', 'challenge', 'special'];
+const campaignStatusList = ['draft', 'active', 'closed', 'archived'];
+const submissionStatusList = ['pending', 'shortlisted', 'winner', 'editor_pick', 'rejected'];
+
+function slugifyCampaign(input) {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яё]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 150) || `campaign-${Date.now()}`;
+}
+
+router.get('/campaigns', async (req, res) => {
+  try {
+    const list = await Campaign.find({})
+      .populate('createdBy', 'username')
+      .populate('updatedBy', 'username')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка чтения кампаний' });
+  }
+});
+
+router.post('/campaigns', [
+  body('title').trim().isLength({ min: 3, max: 140 }),
+  body('type').optional({ nullable: true }).isIn(campaignTypeList),
+  body('status').optional({ nullable: true }).isIn(campaignStatusList),
+  body('slug').optional({ nullable: true }).trim().isLength({ min: 2, max: 160 }),
+  body('startsAt').optional({ nullable: true }).trim(),
+  body('endsAt').optional({ nullable: true }).trim(),
+  body('rulesText').optional({ nullable: true }).trim().isLength({ max: 5000 }),
+  body('hostIntroText').optional({ nullable: true }).trim().isLength({ max: 1000 }),
+  body('hostOutroText').optional({ nullable: true }).trim().isLength({ max: 1000 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const title = String(req.body.title || '').trim();
+    const slugRaw = req.body.slug ? String(req.body.slug).trim() : '';
+    const slug = slugifyCampaign(slugRaw || title);
+    const startsAt = req.body.startsAt ? new Date(String(req.body.startsAt)) : null;
+    const endsAt = req.body.endsAt ? new Date(String(req.body.endsAt)) : null;
+    const startsAtSafe = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null;
+    const endsAtSafe = endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null;
+    if (startsAtSafe && endsAtSafe && endsAtSafe <= startsAtSafe) {
+      return res.status(400).json({ message: 'Дата окончания должна быть позже даты старта' });
+    }
+
+    const created = await Campaign.create({
+      title,
+      slug,
+      type: campaignTypeList.includes(String(req.body.type || '')) ? req.body.type : 'track_week',
+      status: campaignStatusList.includes(String(req.body.status || '')) ? req.body.status : 'draft',
+      startsAt: startsAtSafe,
+      endsAt: endsAtSafe,
+      rulesText: String(req.body.rulesText || '').trim(),
+      hostIntroText: String(req.body.hostIntroText || '').trim(),
+      hostOutroText: String(req.body.hostOutroText || '').trim(),
+      allowExistingTracks: req.body.allowExistingTracks !== false && String(req.body.allowExistingTracks) !== 'false',
+      allowUploadOptIn: req.body.allowUploadOptIn !== false && String(req.body.allowUploadOptIn) !== 'false',
+      createdBy: req.user._id,
+      updatedBy: req.user._id
+    });
+
+    const out = await Campaign.findById(created._id)
+      .populate('createdBy', 'username')
+      .populate('updatedBy', 'username')
+      .lean();
+    res.json(out);
+  } catch (err) {
+    if (String(err?.code) === '11000') {
+      return res.status(400).json({ message: 'Кампания с таким slug уже существует' });
+    }
+    res.status(500).json({ message: err.message || 'Ошибка создания кампании' });
+  }
+});
+
+router.put('/campaigns/:id', [
+  param('id').isMongoId(),
+  body('title').optional({ nullable: true }).trim().isLength({ min: 3, max: 140 }),
+  body('type').optional({ nullable: true }).isIn(campaignTypeList),
+  body('status').optional({ nullable: true }).isIn(campaignStatusList),
+  body('slug').optional({ nullable: true }).trim().isLength({ min: 2, max: 160 }),
+  body('startsAt').optional({ nullable: true }).trim(),
+  body('endsAt').optional({ nullable: true }).trim(),
+  body('rulesText').optional({ nullable: true }).trim().isLength({ max: 5000 }),
+  body('hostIntroText').optional({ nullable: true }).trim().isLength({ max: 1000 }),
+  body('hostOutroText').optional({ nullable: true }).trim().isLength({ max: 1000 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const doc = await Campaign.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: 'Кампания не найдена' });
+
+    if (req.body.title !== undefined) doc.title = String(req.body.title || '').trim();
+    if (req.body.slug !== undefined) doc.slug = slugifyCampaign(req.body.slug);
+    if (req.body.type !== undefined) doc.type = req.body.type;
+    if (req.body.status !== undefined) doc.status = req.body.status;
+    if (req.body.rulesText !== undefined) doc.rulesText = String(req.body.rulesText || '').trim();
+    if (req.body.hostIntroText !== undefined) doc.hostIntroText = String(req.body.hostIntroText || '').trim();
+    if (req.body.hostOutroText !== undefined) doc.hostOutroText = String(req.body.hostOutroText || '').trim();
+    if (req.body.allowExistingTracks !== undefined) {
+      doc.allowExistingTracks = req.body.allowExistingTracks === true || String(req.body.allowExistingTracks) === 'true';
+    }
+    if (req.body.allowUploadOptIn !== undefined) {
+      doc.allowUploadOptIn = req.body.allowUploadOptIn === true || String(req.body.allowUploadOptIn) === 'true';
+    }
+    if (req.body.startsAt !== undefined) {
+      if (!req.body.startsAt) doc.startsAt = null;
+      else {
+        const d = new Date(String(req.body.startsAt));
+        doc.startsAt = Number.isNaN(d.getTime()) ? null : d;
+      }
+    }
+    if (req.body.endsAt !== undefined) {
+      if (!req.body.endsAt) doc.endsAt = null;
+      else {
+        const d = new Date(String(req.body.endsAt));
+        doc.endsAt = Number.isNaN(d.getTime()) ? null : d;
+      }
+    }
+    if (doc.startsAt && doc.endsAt && doc.endsAt <= doc.startsAt) {
+      return res.status(400).json({ message: 'Дата окончания должна быть позже даты старта' });
+    }
+    doc.updatedBy = req.user._id;
+    await doc.save();
+    const out = await Campaign.findById(doc._id)
+      .populate('createdBy', 'username')
+      .populate('updatedBy', 'username')
+      .lean();
+    res.json(out);
+  } catch (err) {
+    if (String(err?.code) === '11000') {
+      return res.status(400).json({ message: 'Кампания с таким slug уже существует' });
+    }
+    res.status(500).json({ message: err.message || 'Ошибка обновления кампании' });
+  }
+});
+
+router.delete('/campaigns/:id', [param('id').isMongoId()], async (req, res) => {
+  try {
+    const doc = await Campaign.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ message: 'Кампания не найдена' });
+    await CampaignSubmission.deleteMany({ campaignId: doc._id });
+    res.json({ message: 'Кампания удалена' });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка удаления кампании' });
+  }
+});
+
+router.get('/campaigns/:id/submissions', [param('id').isMongoId()], async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id).lean();
+    if (!campaign) return res.status(404).json({ message: 'Кампания не найдена' });
+    const status = String(req.query.status || '').trim();
+    const filter = { campaignId: campaign._id };
+    if (status && submissionStatusList.includes(status)) filter.status = status;
+    const rows = await CampaignSubmission.find(filter)
+      .populate({ path: 'trackId', select: 'title coverImage status createdAt author', populate: { path: 'author', select: 'username' } })
+      .populate('authorId', 'username')
+      .sort({ submittedAt: -1 })
+      .lean();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка чтения заявок кампании' });
+  }
+});
+
+router.put('/campaigns/:id/submissions/:submissionId/status', [
+  param('id').isMongoId(),
+  param('submissionId').isMongoId(),
+  body('status').isIn(submissionStatusList),
+  body('adminNote').optional({ nullable: true }).trim().isLength({ max: 2000 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const campaign = await Campaign.findById(req.params.id).lean();
+    if (!campaign) return res.status(404).json({ message: 'Кампания не найдена' });
+    const sub = await CampaignSubmission.findOne({ _id: req.params.submissionId, campaignId: campaign._id });
+    if (!sub) return res.status(404).json({ message: 'Заявка не найдена' });
+    sub.status = req.body.status;
+    if (req.body.adminNote !== undefined) sub.adminNote = String(req.body.adminNote || '').trim();
+    await sub.save();
+    const out = await CampaignSubmission.findById(sub._id)
+      .populate({ path: 'trackId', select: 'title coverImage status createdAt author', populate: { path: 'author', select: 'username' } })
+      .populate('authorId', 'username')
+      .lean();
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Ошибка обновления заявки' });
   }
 });
 
