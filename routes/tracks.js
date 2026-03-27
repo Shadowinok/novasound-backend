@@ -492,29 +492,14 @@ router.get('/radio/now', async (req, res) => {
     // В очередь берём ровно `limit`
     const orderedQueue = shuffled.slice(0, limit);
 
-    const cycleDuration = orderedQueue.reduce((sum, t) => sum + t.duration, 0);
-    let pos = cycleDuration > 0 ? (nowSec % cycleDuration) : 0;
-
-    let currentIndex = 0;
-    for (let i = 0; i < orderedQueue.length; i += 1) {
-      const d = orderedQueue[i].duration;
-      if (pos < d) {
-        currentIndex = i;
-        break;
-      }
-      pos -= d;
-    }
-
-    const rotateQueue = [
-      ...orderedQueue.slice(currentIndex),
-      ...orderedQueue.slice(0, currentIndex)
-    ];
-
+    // Аварийная стабилизация: не привязываем текущий трек к wall-clock,
+    // чтобы не получать скачки и оффсеты при повторных /radio/now.
+    const rotateQueue = [...orderedQueue];
     const nowTrack = rotateQueue[0];
-    const nowOffsetSec = Math.max(0, Math.min(nowTrack.duration, Math.floor(pos)));
+    const nowOffsetSec = 0;
     const history = [];
     for (let i = 1; i <= 5; i += 1) {
-      const idx = (orderedQueue.length + currentIndex - i) % orderedQueue.length;
+      const idx = (orderedQueue.length - i) % orderedQueue.length;
       history.push(orderedQueue[idx]);
     }
 
