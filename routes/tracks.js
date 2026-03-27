@@ -63,6 +63,8 @@ function getMskDateParts(now = new Date()) {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
       hour12: false
     });
     const parts = fmt.formatToParts(now);
@@ -71,16 +73,20 @@ function getMskDateParts(now = new Date()) {
     const month = pick('month');
     const day = pick('day');
     const hourNum = Number(pick('hour'));
+    const minuteNum = Number(pick('minute'));
+    const secondNum = Number(pick('second'));
     return {
       dayKey: `${year}-${month}-${day}`,
-      hour: Number.isFinite(hourNum) ? hourNum : getMskHour()
+      hour: Number.isFinite(hourNum) ? hourNum : getMskHour(),
+      minute: Number.isFinite(minuteNum) ? minuteNum : 0,
+      second: Number.isFinite(secondNum) ? secondNum : 0
     };
   } catch (_) {
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    return { dayKey: `${y}-${m}-${day}`, hour: getMskHour() };
+    return { dayKey: `${y}-${m}-${day}`, hour: getMskHour(), minute: d.getMinutes(), second: d.getSeconds() };
   }
 }
 
@@ -492,14 +498,40 @@ router.get('/radio/now', async (req, res) => {
     // В очередь берём ровно `limit`
     const orderedQueue = shuffled.slice(0, limit);
 
-    // Аварийная стабилизация: не привязываем текущий трек к wall-clock,
-    // чтобы не получать скачки и оффсеты при повторных /radio/now.
-    const rotateQueue = [...orderedQueue];
+    const cycleDuration = orderedQueue.reduce((sum, t) => sum + t.duration, 0);
+    const hour = Number(msk.hour) || 0;
+    const minute = Number(msk.minute) || 0;
+    const second = Number(msk.second) || 0;
+    let elapsedInBlockSec = 0;
+    if (timeBlock.id === 'morning') {
+      elapsedInBlockSec = ((hour - 5) * 3600) + (minute * 60) + second;
+    } else if (timeBlock.id === 'day') {
+      elapsedInBlockSec = ((hour - 12) * 3600) + (minute * 60) + second;
+    } else if (timeBlock.id === 'evening') {
+      elapsedInBlockSec = ((hour - 19) * 3600) + (minute * 60) + second;
+    } else {
+      // Ночной блок 23:00-04:59 пересекает полночь.
+      elapsedInBlockSec = ((hour >= 23 ? hour - 23 : hour + 1) * 3600) + (minute * 60) + second;
+    }
+    let pos = cycleDuration > 0 ? (Math.max(0, elapsedInBlockSec) % cycleDuration) : 0;
+    let currentIndex = 0;
+    for (let i = 0; i < orderedQueue.length; i += 1) {
+      const d = orderedQueue[i].duration;
+      if (pos < d) {
+        currentIndex = i;
+        break;
+      }
+      pos -= d;
+    }
+    const rotateQueue = [
+      ...orderedQueue.slice(currentIndex),
+      ...orderedQueue.slice(0, currentIndex)
+    ];
     const nowTrack = rotateQueue[0];
-    const nowOffsetSec = 0;
+    const nowOffsetSec = Math.max(0, Math.min(nowTrack.duration, Math.floor(pos)));
     const history = [];
     for (let i = 1; i <= 5; i += 1) {
-      const idx = (orderedQueue.length - i) % orderedQueue.length;
+      const idx = (orderedQueue.length + currentIndex - i) % orderedQueue.length;
       history.push(orderedQueue[idx]);
     }
 
