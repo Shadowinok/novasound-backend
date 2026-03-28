@@ -12,6 +12,7 @@ const playlistsRoutes = require('./routes/playlists');
 const usersRoutes = require('./routes/users');
 const announcementsRoutes = require('./routes/announcements');
 const campaignsRoutes = require('./routes/campaigns');
+const chatRoutes = require('./routes/chat');
 
 connectDB();
 initGridFS();
@@ -51,6 +52,15 @@ function originAllowed(origin) {
   if (!origin) return true;
   const normalized = normalizeOrigin(origin);
   if (allowedOrigins.has(normalized)) return true;
+  // Capacitor / Ionic WebView (Android чаще https://localhost, iOS — ionic://localhost)
+  if (
+    normalized === 'https://localhost' ||
+    normalized === 'http://localhost' ||
+    normalized === 'capacitor://localhost' ||
+    normalized === 'ionic://localhost'
+  ) {
+    return true;
+  }
   try {
     const u = new URL(origin);
     const h = u.hostname.toLowerCase();
@@ -80,6 +90,7 @@ app.use('/api/playlists', playlistsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/announcements', announcementsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
+app.use('/api/chat', chatRoutes);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

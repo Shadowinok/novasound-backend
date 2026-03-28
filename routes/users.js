@@ -1,5 +1,5 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
+const { body, query, validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const User = require('../models/User');
@@ -9,6 +9,29 @@ const ListenLog = require('../models/ListenLog');
 const { getGridFS } = require('../config/gridfs');
 
 const router = express.Router();
+
+router.get('/search', protect, [
+  query('q').trim().isLength({ min: 1, max: 64 }).withMessage('q')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const q = String(req.query.q || '').trim();
+    const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(esc, 'i');
+    const users = await User.find({
+      _id: { $ne: req.user._id },
+      username: re,
+      isBlocked: { $ne: true }
+    })
+      .select('username')
+      .limit(20)
+      .lean();
+    res.json(users.map((u) => ({ _id: u._id, username: u.username })));
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'search error' });
+  }
+});
 
 // DELETE /api/users/me — удалить свой аккаунт (требует пароль)
 router.delete('/me', protect, [

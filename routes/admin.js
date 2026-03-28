@@ -84,6 +84,33 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// PUT /api/admin/users/:id/role — роль (user | moderator | admin)
+router.put(
+  '/users/:id/role',
+  [param('id').isMongoId(), body('role').isIn(['user', 'moderator', 'admin']).withMessage('role')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+      const id = req.params.id;
+      const role = String(req.body.role);
+      const target = await User.findById(id).select('role').lean();
+      if (!target) return res.status(404).json({ message: 'Пользователь не найден' });
+      if (target.role === 'admin' && role !== 'admin') {
+        const adminCount = await User.countDocuments({ role: 'admin' });
+        if (adminCount <= 1) {
+          return res.status(400).json({ message: 'Нельзя снять последнего администратора' });
+        }
+      }
+      await User.updateOne({ _id: id }, { $set: { role } });
+      const u = await User.findById(id).select('username email role emailVerified isBlocked createdAt').lean();
+      res.json(u);
+    } catch (err) {
+      res.status(500).json({ message: err.message || 'Ошибка' });
+    }
+  }
+);
+
 // GET /api/admin/playlists — только публичные подборки (личные пользователей не показываем)
 router.get('/playlists', async (req, res) => {
   try {
@@ -621,6 +648,14 @@ router.get('/radio-host-settings', async (req, res) => {
       settings = created.toObject();
     }
     res.json({
+      requestDeskEnabled: !!settings.requestDeskEnabled,
+      requestDeskEverySongs: Math.max(1, Math.min(40, Number(settings.requestDeskEverySongs) || 6)),
+      requestDeskMinIntervalMinutes: Math.max(1, Math.min(120, Number(settings.requestDeskMinIntervalMinutes) || 4)),
+      requestDeskBanterChance: Math.min(1, Math.max(0, Number(settings.requestDeskBanterChance) ?? 0.22)),
+      deskIntroTemplate: String(settings.deskIntroTemplate || ''),
+      deskBodyTemplate: String(settings.deskBodyTemplate || ''),
+      deskOutroTemplate: String(settings.deskOutroTemplate || ''),
+      deskBanterTemplate: String(settings.deskBanterTemplate || ''),
       mode: settings.mode || 'fixed',
       fixedEverySongs: Number(settings.fixedEverySongs) || 2,
       randomMinSongs: Number(settings.randomMinSongs) || 2,
@@ -640,7 +675,15 @@ router.put('/radio-host-settings', [
   body('randomMinSongs').optional({ nullable: true }).toInt(),
   body('randomMaxSongs').optional({ nullable: true }).toInt(),
   body('radioPlaylistMode').optional({ nullable: true }).isIn(['random', 'dj']).withMessage('radioPlaylistMode: random|dj'),
-  body('djTheme').optional({ nullable: true }).isIn(['auto', 'mixed', 'energetic', 'chill', 'night', 'rock', 'pop', 'electro', 'hiphop', 'jazz']).withMessage('djTheme invalid')
+  body('djTheme').optional({ nullable: true }).isIn(['auto', 'mixed', 'energetic', 'chill', 'night', 'rock', 'pop', 'electro', 'hiphop', 'jazz']).withMessage('djTheme invalid'),
+  body('requestDeskEnabled').optional({ nullable: true }).isBoolean().withMessage('requestDeskEnabled must be boolean'),
+  body('requestDeskEverySongs').optional({ nullable: true }).toInt(),
+  body('requestDeskMinIntervalMinutes').optional({ nullable: true }).toInt(),
+  body('requestDeskBanterChance').optional({ nullable: true }).toFloat(),
+  body('deskIntroTemplate').optional({ nullable: true }).isString().isLength({ max: 500 }),
+  body('deskBodyTemplate').optional({ nullable: true }).isString().isLength({ max: 800 }),
+  body('deskOutroTemplate').optional({ nullable: true }).isString().isLength({ max: 500 }),
+  body('deskBanterTemplate').optional({ nullable: true }).isString().isLength({ max: 300 }),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -653,24 +696,50 @@ router.put('/radio-host-settings', [
     const randomMaxSongs = Math.max(randomMinSongs, randomMaxSongsRaw);
     const radioPlaylistMode = req.body.radioPlaylistMode === 'dj' ? 'dj' : 'random';
     const djTheme = String(req.body.djTheme || 'auto');
+    const setPayload = {
+      mode,
+      fixedEverySongs,
+      randomMinSongs,
+      randomMaxSongs,
+      radioPlaylistMode,
+      djTheme,
+      updatedBy: req.user._id
+    };
+    if (req.body.requestDeskEnabled !== undefined) {
+      setPayload.requestDeskEnabled = !!req.body.requestDeskEnabled;
+    }
+    if (req.body.requestDeskEverySongs !== undefined) {
+      setPayload.requestDeskEverySongs = Math.max(1, Math.min(40, Number(req.body.requestDeskEverySongs) || 6));
+    }
+    if (req.body.requestDeskMinIntervalMinutes !== undefined) {
+      setPayload.requestDeskMinIntervalMinutes = Math.max(1, Math.min(120, Number(req.body.requestDeskMinIntervalMinutes) || 4));
+    }
+    if (req.body.requestDeskBanterChance !== undefined) {
+      const b = Number(req.body.requestDeskBanterChance);
+      setPayload.requestDeskBanterChance = Number.isFinite(b) ? Math.min(1, Math.max(0, b)) : 0.22;
+    }
+    if (req.body.deskIntroTemplate !== undefined) setPayload.deskIntroTemplate = String(req.body.deskIntroTemplate || '').slice(0, 500);
+    if (req.body.deskBodyTemplate !== undefined) setPayload.deskBodyTemplate = String(req.body.deskBodyTemplate || '').slice(0, 800);
+    if (req.body.deskOutroTemplate !== undefined) setPayload.deskOutroTemplate = String(req.body.deskOutroTemplate || '').slice(0, 500);
+    if (req.body.deskBanterTemplate !== undefined) setPayload.deskBanterTemplate = String(req.body.deskBanterTemplate || '').slice(0, 300);
 
     const settings = await RadioHostSettings.findOneAndUpdate(
       { key: 'main' },
       {
-        $set: {
-          mode,
-          fixedEverySongs,
-          randomMinSongs,
-          randomMaxSongs,
-          radioPlaylistMode,
-          djTheme,
-          updatedBy: req.user._id
-        }
+        $set: setPayload
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
 
     res.json({
+      requestDeskEnabled: !!settings.requestDeskEnabled,
+      requestDeskEverySongs: Math.max(1, Math.min(40, Number(settings.requestDeskEverySongs) || 6)),
+      requestDeskMinIntervalMinutes: Math.max(1, Math.min(120, Number(settings.requestDeskMinIntervalMinutes) || 4)),
+      requestDeskBanterChance: Math.min(1, Math.max(0, Number(settings.requestDeskBanterChance) ?? 0.22)),
+      deskIntroTemplate: String(settings.deskIntroTemplate || ''),
+      deskBodyTemplate: String(settings.deskBodyTemplate || ''),
+      deskOutroTemplate: String(settings.deskOutroTemplate || ''),
+      deskBanterTemplate: String(settings.deskBanterTemplate || ''),
       mode: settings.mode,
       fixedEverySongs: settings.fixedEverySongs,
       randomMinSongs: settings.randomMinSongs,

@@ -1025,7 +1025,9 @@ router.get('/host-settings', async (req, res) => {
       randomMinSongs: Number(settings.randomMinSongs) || 2,
       randomMaxSongs: Number(settings.randomMaxSongs) || 5,
       radioPlaylistMode: settings.radioPlaylistMode || 'random',
-      djTheme: settings.djTheme || 'auto'
+      djTheme: settings.djTheme || 'auto',
+      requestDeskEnabled: !!settings.requestDeskEnabled,
+      requestDeskEverySongs: Math.max(1, Math.min(40, Number(settings.requestDeskEverySongs) || 6))
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Ошибка чтения настроек ведущего' });

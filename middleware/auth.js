@@ -70,3 +70,10 @@ exports.adminOnly = (req, res, next) => {
   }
   next();
 };
+
+/** Админ или модератор чата */
+exports.modOrAdmin = (req, res, next) => {
+  const r = req.user?.role;
+  if (r === 'admin' || r === 'moderator') return next();
+  return res.status(403).json({ message: 'Доступ только для модерации чата' });
+};
